@@ -4,8 +4,7 @@
 #include "esphome/components/sensor/sensor.h"
 #include "Wire.h"
 
-namespace esphome {
-namespace mpu6050_custom {
+using namespace esphome;
 
 class MPU6050Custom : public PollingComponent {
  public:
@@ -43,6 +42,3 @@ class MPU6050Custom : public PollingComponent {
   void calibrate();
   void do_recalibrate();
 };
-
-}  // namespace mpu6050_custom
-}  // namespace esphome

@@ -2,9 +2,6 @@
 #include "esphome/core/log.h"
 #include <cmath>
 
-namespace esphome {
-namespace mpu6050_custom {
-
 static const char *TAG = "mpu6050_custom";
 
 void MPU6050Custom::setup() {
@@ -51,7 +48,9 @@ void MPU6050Custom::calibrate() {
     int16_t raw_ay = Wire.read() << 8 | Wire.read();
     int16_t raw_az = Wire.read() << 8 | Wire.read();
 
-    Wire.read(); Wire.read();  // temperature (ignored)
+    // temperature bytes (ignored here)
+    Wire.read();
+    Wire.read();
 
     int16_t raw_gx = Wire.read() << 8 | Wire.read();
     int16_t raw_gy = Wire.read() << 8 | Wire.read();
@@ -132,12 +131,9 @@ void MPU6050Custom::update() {
   gyro_z->publish_state(gz);
 
   // --- Angle Calculation (0–180°) ---
-  float angle_x_deg = abs(atan2(ax, sqrt(ay * ay + az * az)) * 180.0 / M_PI);
-  float angle_y_deg = abs(atan2(ay, sqrt(ax * ax + az * az)) * 180.0 / M_PI);
+  float angle_x_deg = std::abs(std::atan2(ax, std::sqrt(ay * ay + az * az)) * 180.0 / M_PI);
+  float angle_y_deg = std::abs(std::atan2(ay, std::sqrt(ax * ax + az * az)) * 180.0 / M_PI);
 
   angle_x->publish_state(angle_x_deg);
   angle_y->publish_state(angle_y_deg);
 }
-
-}  // namespace mpu6050_custom
-}  // namespace esphome
