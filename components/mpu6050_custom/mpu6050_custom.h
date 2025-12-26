@@ -4,6 +4,9 @@
 #include "esphome/components/sensor/sensor.h"
 #include "Wire.h"
 
+namespace esphome {
+namespace mpu6050_custom {
+
 class MPU6050Custom : public PollingComponent {
  public:
   // Accelerometer sensors
@@ -40,3 +43,6 @@ class MPU6050Custom : public PollingComponent {
   void calibrate();
   void do_recalibrate();
 };
+
+}  // namespace mpu6050_custom
+}  // namespace esphome
