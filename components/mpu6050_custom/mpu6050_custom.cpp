@@ -5,27 +5,16 @@
 static const char *TAG = "mpu6050_custom";
 
 void MPU6050Custom::setup() {
-  ESP_LOGI(TAG, "Initializing MPU6050...");
+  ESP_LOGI(TAG, "Initializing MPU6050 using ESPHome I2C API...");
 
-  Wire.begin();
+  // Wake up MPU6050 (PWR_MGMT_1 = 0)
+  this->write_byte(0x6B, 0x00);
 
-  // Wake up MPU6050
-  Wire.beginTransmission(0x68);
-  Wire.write(0x6B);
-  Wire.write(0);
-  Wire.endTransmission();
+  // Accelerometer config: ±4g (ACCEL_CONFIG = 0x08)
+  this->write_byte(0x1C, 0x08);
 
-  // Set accelerometer sensitivity to ±4g
-  Wire.beginTransmission(0x68);
-  Wire.write(0x1C);
-  Wire.write(0x08);
-  Wire.endTransmission();
-
-  // Set gyroscope sensitivity to ±250°/s
-  Wire.beginTransmission(0x68);
-  Wire.write(0x1B);
-  Wire.write(0x00);
-  Wire.endTransmission();
+  // Gyro config: ±250°/s (GYRO_CONFIG = 0x00)
+  this->write_byte(0x1B, 0x00);
 
   // Auto-calibrate on boot
   this->calibrate();
@@ -38,23 +27,21 @@ void MPU6050Custom::calibrate() {
   float ax_sum = 0, ay_sum = 0, az_sum = 0;
   float gx_sum = 0, gy_sum = 0, gz_sum = 0;
 
+  uint8_t data[14];
+
   for (int i = 0; i < samples; i++) {
-    Wire.beginTransmission(0x68);
-    Wire.write(0x3B);
-    Wire.endTransmission(false);
-    Wire.requestFrom(0x68, 14, true);
+    if (!this->read_bytes(0x3B, data, 14)) {
+      ESP_LOGW(TAG, "I2C read failed during calibration");
+      continue;
+    }
 
-    int16_t raw_ax = Wire.read() << 8 | Wire.read();
-    int16_t raw_ay = Wire.read() << 8 | Wire.read();
-    int16_t raw_az = Wire.read() << 8 | Wire.read();
+    int16_t raw_ax = (data[0] << 8) | data[1];
+    int16_t raw_ay = (data[2] << 8) | data[3];
+    int16_t raw_az = (data[4] << 8) | data[5];
 
-    // temperature bytes (ignored here)
-    Wire.read();
-    Wire.read();
-
-    int16_t raw_gx = Wire.read() << 8 | Wire.read();
-    int16_t raw_gy = Wire.read() << 8 | Wire.read();
-    int16_t raw_gz = Wire.read() << 8 | Wire.read();
+    int16_t raw_gx = (data[8] << 8) | data[9];
+    int16_t raw_gy = (data[10] << 8) | data[11];
+    int16_t raw_gz = (data[12] << 8) | data[13];
 
     ax_sum += raw_ax / 8192.0;
     ay_sum += raw_ay / 8192.0;
@@ -84,15 +71,18 @@ void MPU6050Custom::do_recalibrate() {
 }
 
 void MPU6050Custom::update() {
-  // --- Accelerometer ---
-  Wire.beginTransmission(0x68);
-  Wire.write(0x3B);
-  Wire.endTransmission(false);
-  Wire.requestFrom(0x68, 6, true);
+  uint8_t data[14];
 
-  int16_t raw_ax = Wire.read() << 8 | Wire.read();
-  int16_t raw_ay = Wire.read() << 8 | Wire.read();
-  int16_t raw_az = Wire.read() << 8 | Wire.read();
+  // Read all accel, temp, gyro registers in one burst
+  if (!this->read_bytes(0x3B, data, 14)) {
+    ESP_LOGW(TAG, "I2C read failed during update()");
+    return;
+  }
+
+  // --- Accelerometer ---
+  int16_t raw_ax = (data[0] << 8) | data[1];
+  int16_t raw_ay = (data[2] << 8) | data[3];
+  int16_t raw_az = (data[4] << 8) | data[5];
 
   float ax = (raw_ax / 8192.0) - accel_x_offset;
   float ay = (raw_ay / 8192.0) - accel_y_offset;
@@ -103,24 +93,14 @@ void MPU6050Custom::update() {
   accel_z->publish_state(az);
 
   // --- Temperature ---
-  Wire.beginTransmission(0x68);
-  Wire.write(0x41);
-  Wire.endTransmission(false);
-  Wire.requestFrom(0x68, 2, true);
-
-  int16_t raw_temp = Wire.read() << 8 | Wire.read();
+  int16_t raw_temp = (data[6] << 8) | data[7];
   float temp_c = (raw_temp / 340.0) + 36.53;
   temperature->publish_state(temp_c);
 
   // --- Gyroscope ---
-  Wire.beginTransmission(0x68);
-  Wire.write(0x43);
-  Wire.endTransmission(false);
-  Wire.requestFrom(0x68, 6, true);
-
-  int16_t raw_gx = Wire.read() << 8 | Wire.read();
-  int16_t raw_gy = Wire.read() << 8 | Wire.read();
-  int16_t raw_gz = Wire.read() << 8 | Wire.read();
+  int16_t raw_gx = (data[8] << 8) | data[9];
+  int16_t raw_gy = (data[10] << 8) | data[11];
+  int16_t raw_gz = (data[12] << 8) | data[13];
 
   float gx = (raw_gx / 131.0) - gyro_x_offset;
   float gy = (raw_gy / 131.0) - gyro_y_offset;
