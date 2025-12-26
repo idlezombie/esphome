@@ -5,8 +5,8 @@ from esphome.const import (
     CONF_ID,
     UNIT_CELSIUS,
     UNIT_DEGREES,
+    UNIT_DEGREES_PER_SECOND,
     UNIT_G,
-    UNIT_RADIANS_PER_SECOND,
     ICON_THERMOMETER,
 )
 
@@ -14,7 +14,7 @@ mpu6050_ns = cg.esphome_ns.namespace("mpu6050_custom")
 MPU6050Custom = mpu6050_ns.class_("MPU6050Custom", cg.PollingComponent, i2c.I2CDevice)
 
 # -----------------------------
-# Sensor configuration options
+# Sensor configuration keys
 # -----------------------------
 
 CONF_ACCEL_X = "accel_x"
@@ -39,6 +39,7 @@ CONFIG_SCHEMA = (
         {
             cv.GenerateID(): cv.declare_id(MPU6050Custom),
 
+            # Accelerometer sensors
             cv.Optional(CONF_ACCEL_X): sensor.sensor_schema(
                 unit_of_measurement=UNIT_G,
                 icon="mdi:axis-arrow",
@@ -55,28 +56,31 @@ CONFIG_SCHEMA = (
                 accuracy_decimals=3,
             ),
 
+            # Gyroscope sensors
             cv.Optional(CONF_GYRO_X): sensor.sensor_schema(
-                unit_of_measurement=UNIT_RADIANS_PER_SECOND,
+                unit_of_measurement=UNIT_DEGREES_PER_SECOND,
                 icon="mdi:rotate-right",
                 accuracy_decimals=3,
             ),
             cv.Optional(CONF_GYRO_Y): sensor.sensor_schema(
-                unit_of_measurement=UNIT_RADIANS_PER_SECOND,
+                unit_of_measurement=UNIT_DEGREES_PER_SECOND,
                 icon="mdi:rotate-right",
                 accuracy_decimals=3,
             ),
             cv.Optional(CONF_GYRO_Z): sensor.sensor_schema(
-                unit_of_measurement=UNIT_RADIANS_PER_SECOND,
+                unit_of_measurement=UNIT_DEGREES_PER_SECOND,
                 icon="mdi:rotate-right",
                 accuracy_decimals=3,
             ),
 
+            # Temperature
             cv.Optional(CONF_TEMPERATURE): sensor.sensor_schema(
                 unit_of_measurement=UNIT_CELSIUS,
                 icon=ICON_THERMOMETER,
                 accuracy_decimals=1,
             ),
 
+            # Angles
             cv.Optional(CONF_ANGLE_X): sensor.sensor_schema(
                 unit_of_measurement=UNIT_DEGREES,
                 icon="mdi:angle-acute",
@@ -132,6 +136,4 @@ async def to_code(config):
     if CONF_ANGLE_X in config:
         sens = await sensor.new_sensor(config[CONF_ANGLE_X])
         cg.add(var.angle_x.set_parent(sens))
-    if CONF_ANGLE_Y in config:
-        sens = await sensor.new_sensor(config[CONF_ANGLE_Y])
-        cg.add(var.angle_y.set_parent(sens))
+    if CONF
