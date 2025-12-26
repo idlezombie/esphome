@@ -5,7 +5,6 @@ from esphome.const import (
     CONF_ID,
     UNIT_CELSIUS,
     UNIT_DEGREES,
-    UNIT_DEGREES_PER_SECOND,
     UNIT_G,
     ICON_THERMOMETER,
 )
@@ -31,6 +30,7 @@ CONFIG_SCHEMA = (
         {
             cv.GenerateID(): cv.declare_id(MPU6050Custom),
 
+            # Accelerometer
             cv.Optional(CONF_ACCEL_X): sensor.sensor_schema(
                 unit_of_measurement=UNIT_G,
                 icon="mdi:axis-arrow",
@@ -47,28 +47,31 @@ CONFIG_SCHEMA = (
                 accuracy_decimals=3,
             ),
 
+            # Gyroscope (NO UNIT — your ESPHome version does not support gyro units)
             cv.Optional(CONF_GYRO_X): sensor.sensor_schema(
-                unit_of_measurement=UNIT_DEGREES_PER_SECOND,
+                unit_of_measurement=None,
                 icon="mdi:rotate-right",
                 accuracy_decimals=3,
             ),
             cv.Optional(CONF_GYRO_Y): sensor.sensor_schema(
-                unit_of_measurement=UNIT_DEGREES_PER_SECOND,
+                unit_of_measurement=None,
                 icon="mdi:rotate-right",
                 accuracy_decimals=3,
             ),
             cv.Optional(CONF_GYRO_Z): sensor.sensor_schema(
-                unit_of_measurement=UNIT_DEGREES_PER_SECOND,
+                unit_of_measurement=None,
                 icon="mdi:rotate-right",
                 accuracy_decimals=3,
             ),
 
+            # Temperature
             cv.Optional(CONF_TEMPERATURE): sensor.sensor_schema(
                 unit_of_measurement=UNIT_CELSIUS,
                 icon=ICON_THERMOMETER,
                 accuracy_decimals=1,
             ),
 
+            # Angles
             cv.Optional(CONF_ANGLE_X): sensor.sensor_schema(
                 unit_of_measurement=UNIT_DEGREES,
                 icon="mdi:angle-acute",
