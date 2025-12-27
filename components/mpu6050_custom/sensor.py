@@ -9,6 +9,10 @@ from esphome.const import (
     ICON_THERMOMETER,
 )
 
+# Required so ESPHome knows this is a sensor platform
+DEPENDENCIES = ["i2c"]
+AUTO_LOAD = ["sensor"]
+
 mpu6050_ns = cg.esphome_ns.namespace("mpu6050_custom")
 MPU6050Custom = mpu6050_ns.class_("MPU6050Custom", cg.PollingComponent, i2c.I2CDevice)
 
@@ -47,7 +51,7 @@ CONFIG_SCHEMA = (
                 accuracy_decimals=3,
             ),
 
-            # Gyroscope (NO UNIT — your ESPHome version does not support gyro units)
+            # Gyroscope (no unit — your ESPHome version lacks gyro units)
             cv.Optional(CONF_GYRO_X): sensor.sensor_schema(
                 unit_of_measurement=None,
                 icon="mdi:rotate-right",
@@ -122,3 +126,6 @@ async def to_code(config):
     if CONF_ANGLE_Y in config:
         sens = await sensor.new_sensor(config[CONF_ANGLE_Y])
         cg.add(var.angle_y.set_parent(sens))
+
+# Register this as a sensor platform
+sensor.register_sensor(MPU6050Custom)
