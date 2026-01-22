@@ -19,6 +19,8 @@ CONF_ANGLE_Z = "angle_z"
 mpu6050_ns = cg.esphome_ns.namespace("mpu6050_tilt")
 MPU6050Tilt = mpu6050_ns.class_("MPU6050Tilt", cg.PollingComponent, i2c.I2CDevice)
 
+cv.declare_platform("sensor", "mpu6050_tilt", MPU6050Tilt)
+
 ANGLE_SENSOR_SCHEMA = sensor.sensor_schema(
     unit_of_measurement=UNIT_DEGREE,
     icon=ICON_AXIS_ARROW,
