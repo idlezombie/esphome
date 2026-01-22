@@ -9,6 +9,9 @@ from esphome.const import (
     ICON_AXIS_ARROW,
 )
 
+AUTO_LOAD = ["sensor"]
+DEPENDENCIES = ["i2c"]
+
 CONF_ANGLE_X = "angle_x"
 CONF_ANGLE_Y = "angle_y"
 CONF_ANGLE_Z = "angle_z"
