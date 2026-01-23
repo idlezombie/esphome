@@ -5,8 +5,8 @@ from esphome.const import (
     CONF_ID,
     CONF_ADDRESS,
     CONF_UPDATE_INTERVAL,
-    UNIT_DEGREE,
-    ICON_AXIS_ARROW,
+    UNIT_DEGREES,
+    ICON_EMPTY,
 )
 
 AUTO_LOAD = ["sensor"]
@@ -22,8 +22,8 @@ MPU6050Tilt = mpu6050_ns.class_("MPU6050Tilt", cg.PollingComponent, i2c.I2CDevic
 cv.declare_platform("sensor", "mpu6050_tilt", MPU6050Tilt)
 
 ANGLE_SENSOR_SCHEMA = sensor.sensor_schema(
-    unit_of_measurement=UNIT_DEGREE,
-    icon=ICON_AXIS_ARROW,
+    unit_of_measurement=UNIT_DEGREES,
+    icon=ICON_EMPTY,
     accuracy_decimals=1,
 )
 
