@@ -41,7 +41,7 @@ void MPU6050Tilt::calibrate() {
     sum_ay += raw_ay;
     sum_az += raw_az;
 
-    esphome::delay(5);
+    vTaskDelay(5 / portTICK_PERIOD_MS);
   }
 
   offset_ax_ = sum_ax / samples;
