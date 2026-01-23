@@ -41,7 +41,7 @@ void MPU6050Tilt::calibrate() {
     sum_ay += raw_ay;
     sum_az += raw_az;
 
-    delay(5);
+    esphome::delay(5);
   }
 
   offset_ax_ = sum_ax / samples;
