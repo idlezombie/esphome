@@ -9,19 +9,27 @@ static const char *const TAG = "mpu6050_tilt";
 
 // MPU6050 register addresses
 static const uint8_t MPU6050_REG_PWR_MGMT_1 = 0x6B;
+static const uint8_t MPU6050_REG_SMPLRT_DIV = 0x19;
+static const uint8_t MPU6050_REG_CONFIG = 0x1A;
+static const uint8_t MPU6050_REG_GYRO_CONFIG = 0x1B;
+static const uint8_t MPU6050_REG_ACCEL_CONFIG = 0x1C;
 static const uint8_t MPU6050_REG_ACCEL_XOUT_H = 0x3B;
 static const uint8_t MPU6050_REG_GYRO_XOUT_H = 0x43;
-
-// Scale factors
-static const float ACCEL_SCALE = 16384.0f;  // ±2g
-static const float GYRO_SCALE = 131.0f;     // ±250°/s
 
 void MPU6050Tilt::setup() {
   ESP_LOGI(TAG, "Initializing MPU6050...");
 
   // Wake up the MPU6050
-  this->write_byte(MPU6050_REG_PWR_MGMT_1, 0x00);
-  vTaskDelay(100 / portTICK_PERIOD_MS);
+  if (this->write_byte(MPU6050_REG_PWR_MGMT_1, 0x00) != i2c::ERROR_OK) {
+    ESP_LOGE(TAG, "Failed to wake MPU6050");
+    this->mark_failed();
+    return;
+  }
+
+  if (!this->configure_mpu_()) {
+    this->mark_failed();
+    return;
+  }
 
   this->calibrate();
 }
@@ -36,7 +44,9 @@ void MPU6050Tilt::calibrate() {
 
   for (int i = 0; i < samples; i++) {
     int16_t ax, ay, az, gx, gy, gz;
-    this->read_raw(ax, ay, az, gx, gy, gz);
+    if (!this->read_raw(ax, ay, az, gx, gy, gz)) {
+      continue;
+    }
 
     sum_ax += ax;
     sum_ay += ay;
@@ -50,7 +60,8 @@ void MPU6050Tilt::calibrate() {
 
   offset_ax_ = sum_ax / samples;
   offset_ay_ = sum_ay / samples;
-  offset_az_ = (sum_az / samples) - 16384;  // remove gravity
+  // For tilt use, keep gravity as part of the reference; no hard subtraction here.
+  offset_az_ = sum_az / samples;
   offset_gx_ = sum_gx / samples;
   offset_gy_ = sum_gy / samples;
   offset_gz_ = sum_gz / samples;
@@ -58,10 +69,13 @@ void MPU6050Tilt::calibrate() {
   ESP_LOGI(TAG, "Calibration complete");
 }
 
-void MPU6050Tilt::read_raw(int16_t &ax, int16_t &ay, int16_t &az,
+bool MPU6050Tilt::read_raw(int16_t &ax, int16_t &ay, int16_t &az,
                            int16_t &gx, int16_t &gy, int16_t &gz) {
   uint8_t data[14];
-  this->read_bytes(MPU6050_REG_ACCEL_XOUT_H, data, 14);
+  if (this->read_bytes(MPU6050_REG_ACCEL_XOUT_H, data, 14) != i2c::ERROR_OK) {
+    ESP_LOGW(TAG, "Failed to read MPU6050 data");
+    return false;
+  }
 
   ax = (data[0] << 8) | data[1];
   ay = (data[2] << 8) | data[3];
@@ -69,20 +83,23 @@ void MPU6050Tilt::read_raw(int16_t &ax, int16_t &ay, int16_t &az,
   gx = (data[8] << 8) | data[9];
   gy = (data[10] << 8) | data[11];
   gz = (data[12] << 8) | data[13];
+  return true;
 }
 
 void MPU6050Tilt::update() {
   int16_t raw_ax, raw_ay, raw_az, raw_gx, raw_gy, raw_gz;
-  this->read_raw(raw_ax, raw_ay, raw_az, raw_gx, raw_gy, raw_gz);
+  if (!this->read_raw(raw_ax, raw_ay, raw_az, raw_gx, raw_gy, raw_gz)) {
+    return;
+  }
 
   // Apply calibration offsets
-  float ax = (raw_ax - offset_ax_) / ACCEL_SCALE;
-  float ay = (raw_ay - offset_ay_) / ACCEL_SCALE;
-  float az = (raw_az - offset_az_) / ACCEL_SCALE;
+  float ax = (raw_ax - offset_ax_) / accel_scale_;
+  float ay = (raw_ay - offset_ay_) / accel_scale_;
+  float az = (raw_az - offset_az_) / accel_scale_;
 
-  float gx = (raw_gx - offset_gx_) / GYRO_SCALE;
-  float gy = (raw_gy - offset_gy_) / GYRO_SCALE;
-  float gz = (raw_gz - offset_gz_) / GYRO_SCALE;
+  float gx = (raw_gx - offset_gx_) / gyro_scale_;
+  float gy = (raw_gy - offset_gy_) / gyro_scale_;
+  float gz = (raw_gz - offset_gz_) / gyro_scale_;
 
   // Compute accelerometer angles
   float accel_angle_x = atan2(ay, az) * 180.0f / M_PI;
@@ -96,6 +113,9 @@ void MPU6050Tilt::update() {
   angle_y_ = alpha * (angle_y_ + gy * dt) + (1 - alpha) * accel_angle_y;
   angle_z_ += gz * dt;  // no accel reference for Z
 
+  // Position calculation based on configured axis and open/closed angles
+  this->compute_position_();
+
   // Publish
   if (this->angle_x_sensor_ != nullptr)
     this->angle_x_sensor_->publish_state(angle_x_);
@@ -105,6 +125,91 @@ void MPU6050Tilt::update() {
 
   if (this->angle_z_sensor_ != nullptr)
     this->angle_z_sensor_->publish_state(angle_z_);
+}
+
+bool MPU6050Tilt::configure_mpu_() {
+  // Compute scale factors from FS_SEL settings
+  switch (this->accel_fs_sel_) {
+    case 0: // ±2g
+      this->accel_scale_ = 16384.0f;
+      break;
+    case 1: // ±4g
+      this->accel_scale_ = 8192.0f;
+      break;
+    case 2: // ±8g
+      this->accel_scale_ = 4096.0f;
+      break;
+    case 3: // ±16g
+      this->accel_scale_ = 2048.0f;
+      break;
+    default:
+      this->accel_scale_ = 8192.0f;  // safe default ±4g
+      break;
+  }
+
+  switch (this->gyro_fs_sel_) {
+    case 0: // ±250 dps
+      this->gyro_scale_ = 131.0f;
+      break;
+    case 1: // ±500 dps
+      this->gyro_scale_ = 65.5f;
+      break;
+    case 2: // ±1000 dps
+      this->gyro_scale_ = 32.8f;
+      break;
+    case 3: // ±2000 dps
+      this->gyro_scale_ = 16.4f;
+      break;
+    default:
+      this->gyro_scale_ = 65.5f;  // safe default ±500 dps
+      break;
+  }
+
+  // Configure DLPF
+  if (this->write_byte(MPU6050_REG_CONFIG, this->dlpf_cfg_) != i2c::ERROR_OK) {
+    ESP_LOGE(TAG, "Failed to configure DLPF");
+    return false;
+  }
+
+  // Configure gyro full-scale range
+  if (this->write_byte(MPU6050_REG_GYRO_CONFIG, this->gyro_fs_sel_ << 3) != i2c::ERROR_OK) {
+    ESP_LOGE(TAG, "Failed to configure gyro range");
+    return false;
+  }
+
+  // Configure accel full-scale range
+  if (this->write_byte(MPU6050_REG_ACCEL_CONFIG, this->accel_fs_sel_ << 3) != i2c::ERROR_OK) {
+    ESP_LOGE(TAG, "Failed to configure accel range");
+    return false;
+  }
+
+  // Set sample rate divider to 0 (use internal rate / (1 + 0))
+  if (this->write_byte(MPU6050_REG_SMPLRT_DIV, 0x00) != i2c::ERROR_OK) {
+    ESP_LOGE(TAG, "Failed to configure sample rate");
+    return false;
+  }
+
+  return true;
+}
+
+void MPU6050Tilt::compute_position_() {
+  if (this->position_sensor_ == nullptr)
+    return;
+
+  if (this->open_angle_ == this->closed_angle_)
+    return;
+
+  float angle = (this->axis_index_ == 0) ? this->angle_x_ : this->angle_y_;
+
+  float position = (angle - this->closed_angle_) /
+                   (this->open_angle_ - this->closed_angle_) * 100.0f;
+
+  if (position < 0.0f)
+    position = 0.0f;
+  if (position > 100.0f)
+    position = 100.0f;
+
+  this->position_sensor_->publish_state(position);
 }
 
 }  // namespace mpu6050_tilt
