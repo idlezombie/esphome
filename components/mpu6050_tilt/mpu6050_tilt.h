@@ -30,6 +30,14 @@ class MPU6050Tilt : public PollingComponent, public i2c::I2CDevice {
 
   void set_position_sensor(sensor::Sensor *s) { position_sensor_ = s; }
 
+  // Raw (calibrated) gyro and accel for diagnostics
+  void set_raw_accel_x_sensor(sensor::Sensor *s) { raw_accel_x_sensor_ = s; }
+  void set_raw_accel_y_sensor(sensor::Sensor *s) { raw_accel_y_sensor_ = s; }
+  void set_raw_accel_z_sensor(sensor::Sensor *s) { raw_accel_z_sensor_ = s; }
+  void set_raw_gyro_x_sensor(sensor::Sensor *s) { raw_gyro_x_sensor_ = s; }
+  void set_raw_gyro_y_sensor(sensor::Sensor *s) { raw_gyro_y_sensor_ = s; }
+  void set_raw_gyro_z_sensor(sensor::Sensor *s) { raw_gyro_z_sensor_ = s; }
+
   // Configuration setters (called from Python)
   void set_axis_index(uint8_t axis) { axis_index_ = axis; }
   void set_accel_fs_sel(uint8_t fs) { accel_fs_sel_ = fs; }
@@ -92,6 +100,13 @@ class MPU6050Tilt : public PollingComponent, public i2c::I2CDevice {
   sensor::Sensor *angle_y_sensor_{nullptr};
   sensor::Sensor *angle_z_sensor_{nullptr};
   sensor::Sensor *position_sensor_{nullptr};
+  // Diagnostic: raw (calibrated) accel in g, gyro in °/s
+  sensor::Sensor *raw_accel_x_sensor_{nullptr};
+  sensor::Sensor *raw_accel_y_sensor_{nullptr};
+  sensor::Sensor *raw_accel_z_sensor_{nullptr};
+  sensor::Sensor *raw_gyro_x_sensor_{nullptr};
+  sensor::Sensor *raw_gyro_y_sensor_{nullptr};
+  sensor::Sensor *raw_gyro_z_sensor_{nullptr};
 };
 
 }  // namespace mpu6050_tilt

@@ -16,6 +16,13 @@ CONF_ANGLE_X = "angle_x"
 CONF_ANGLE_Y = "angle_y"
 CONF_ANGLE_Z = "angle_z"
 CONF_POSITION = "position"
+# Diagnostic: raw (calibrated) accel and gyro
+CONF_RAW_ACCEL_X = "raw_accel_x"
+CONF_RAW_ACCEL_Y = "raw_accel_y"
+CONF_RAW_ACCEL_Z = "raw_accel_z"
+CONF_RAW_GYRO_X = "raw_gyro_x"
+CONF_RAW_GYRO_Y = "raw_gyro_y"
+CONF_RAW_GYRO_Z = "raw_gyro_z"
 
 # Configuration options
 CONF_AXIS = "axis"
@@ -40,6 +47,20 @@ POSITION_SENSOR_SCHEMA = sensor.sensor_schema(
     unit_of_measurement=UNIT_PERCENT,
     icon=ICON_EMPTY,
     accuracy_decimals=0,
+)
+
+# Diagnostic sensors: calibrated accel in g, gyro in °/s (show in device diagnostics only)
+RAW_ACCEL_SENSOR_SCHEMA = sensor.sensor_schema(
+    unit_of_measurement="g",
+    icon=ICON_EMPTY,
+    accuracy_decimals=3,
+    entity_category="diagnostic",
+)
+RAW_GYRO_SENSOR_SCHEMA = sensor.sensor_schema(
+    unit_of_measurement="°/s",
+    icon=ICON_EMPTY,
+    accuracy_decimals=2,
+    entity_category="diagnostic",
 )
 
 
@@ -109,6 +130,13 @@ CONFIG_SCHEMA = (
                 min=0.0, max=1.0
             ),
             cv.Optional(CONF_STATIONARY_THRESHOLD, default=0.1): cv.float_,
+            # Optional diagnostic sensors (raw calibrated accel/gyro)
+            cv.Optional(CONF_RAW_ACCEL_X): RAW_ACCEL_SENSOR_SCHEMA,
+            cv.Optional(CONF_RAW_ACCEL_Y): RAW_ACCEL_SENSOR_SCHEMA,
+            cv.Optional(CONF_RAW_ACCEL_Z): RAW_ACCEL_SENSOR_SCHEMA,
+            cv.Optional(CONF_RAW_GYRO_X): RAW_GYRO_SENSOR_SCHEMA,
+            cv.Optional(CONF_RAW_GYRO_Y): RAW_GYRO_SENSOR_SCHEMA,
+            cv.Optional(CONF_RAW_GYRO_Z): RAW_GYRO_SENSOR_SCHEMA,
         }
     )
     .extend(cv.polling_component_schema("50ms"))
@@ -141,6 +169,26 @@ async def to_code(config):
     if CONF_POSITION in config:
         sens = await sensor.new_sensor(config[CONF_POSITION])
         cg.add(var.set_position_sensor(sens))
+
+    # Diagnostic: raw accel and gyro
+    if CONF_RAW_ACCEL_X in config:
+        sens = await sensor.new_sensor(config[CONF_RAW_ACCEL_X])
+        cg.add(var.set_raw_accel_x_sensor(sens))
+    if CONF_RAW_ACCEL_Y in config:
+        sens = await sensor.new_sensor(config[CONF_RAW_ACCEL_Y])
+        cg.add(var.set_raw_accel_y_sensor(sens))
+    if CONF_RAW_ACCEL_Z in config:
+        sens = await sensor.new_sensor(config[CONF_RAW_ACCEL_Z])
+        cg.add(var.set_raw_accel_z_sensor(sens))
+    if CONF_RAW_GYRO_X in config:
+        sens = await sensor.new_sensor(config[CONF_RAW_GYRO_X])
+        cg.add(var.set_raw_gyro_x_sensor(sens))
+    if CONF_RAW_GYRO_Y in config:
+        sens = await sensor.new_sensor(config[CONF_RAW_GYRO_Y])
+        cg.add(var.set_raw_gyro_y_sensor(sens))
+    if CONF_RAW_GYRO_Z in config:
+        sens = await sensor.new_sensor(config[CONF_RAW_GYRO_Z])
+        cg.add(var.set_raw_gyro_z_sensor(sens))
 
     # Axis selection for louvre position
     axis_idx = _axis_to_index(config[CONF_AXIS])

@@ -109,6 +109,20 @@ void MPU6050Tilt::update() {
   float gy = (raw_gy - offset_gy_) / gyro_scale_;
   float gz = (raw_gz - offset_gz_) / gyro_scale_;
 
+  // Publish raw (calibrated) accel and gyro for diagnostics
+  if (this->raw_accel_x_sensor_ != nullptr)
+    this->raw_accel_x_sensor_->publish_state(ax);
+  if (this->raw_accel_y_sensor_ != nullptr)
+    this->raw_accel_y_sensor_->publish_state(ay);
+  if (this->raw_accel_z_sensor_ != nullptr)
+    this->raw_accel_z_sensor_->publish_state(az);
+  if (this->raw_gyro_x_sensor_ != nullptr)
+    this->raw_gyro_x_sensor_->publish_state(gx);
+  if (this->raw_gyro_y_sensor_ != nullptr)
+    this->raw_gyro_y_sensor_->publish_state(gy);
+  if (this->raw_gyro_z_sensor_ != nullptr)
+    this->raw_gyro_z_sensor_->publish_state(gz);
+
   // Compute accelerometer angles
   float accel_angle_x = atan2(ay, az) * 180.0f / M_PI;
   float accel_angle_y = atan2(-ax, sqrt(ay * ay + az * az)) * 180.0f / M_PI;
@@ -133,10 +147,14 @@ void MPU6050Tilt::update() {
   if (gyro_magnitude < this->stationary_threshold_) {
     stationary_count_++;
     if (stationary_count_ >= required_stationary_cycles && !is_stationary_) {
-      // Device has been stationary - lock current readings to prevent drift
+      // Device has been stationary - lock to ACCELEROMETER angles (gravity truth),
+      // not the integrated filter state which can have gyro drift. Also reset
+      // filter state to accel so internal state doesn't keep drifting.
       is_stationary_ = true;
-      locked_angle_x_ = angle_x_;
-      locked_angle_y_ = angle_y_;
+      locked_angle_x_ = accel_angle_x;
+      locked_angle_y_ = accel_angle_y;
+      angle_x_ = accel_angle_x;
+      angle_y_ = accel_angle_y;
     }
   } else {
     // Device is moving - unlock and reset counter
