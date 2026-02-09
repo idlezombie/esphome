@@ -25,8 +25,7 @@ CONF_DLPF = "dlpf"
 CONF_CLOSED_ANGLE = "closed_angle"
 CONF_OPEN_ANGLE = "open_angle"
 CONF_SMOOTHING_FACTOR = "smoothing_factor"
-CONF_DEADBAND_THRESHOLD = "deadband_threshold"
-CONF_POSITION_DEADBAND_THRESHOLD = "position_deadband_threshold"
+CONF_STATIONARY_THRESHOLD = "stationary_threshold"
 
 mpu6050_ns = cg.esphome_ns.namespace("mpu6050_tilt")
 MPU6050Tilt = mpu6050_ns.class_("MPU6050Tilt", cg.PollingComponent, i2c.I2CDevice)
@@ -109,8 +108,7 @@ CONFIG_SCHEMA = (
             cv.Optional(CONF_SMOOTHING_FACTOR, default=0.9): cv.float_range(
                 min=0.0, max=1.0
             ),
-            cv.Optional(CONF_DEADBAND_THRESHOLD, default=0.3): cv.float_,
-            cv.Optional(CONF_POSITION_DEADBAND_THRESHOLD, default=3.0): cv.float_,
+            cv.Optional(CONF_STATIONARY_THRESHOLD, default=0.1): cv.float_,
         }
     )
     .extend(cv.polling_component_schema("50ms"))
@@ -163,5 +161,4 @@ async def to_code(config):
 
     # Noise reduction configuration
     cg.add(var.set_smoothing_factor(config[CONF_SMOOTHING_FACTOR]))
-    cg.add(var.set_deadband_threshold(config[CONF_DEADBAND_THRESHOLD]))
-    cg.add(var.set_position_deadband_threshold(config[CONF_POSITION_DEADBAND_THRESHOLD]))
+    cg.add(var.set_stationary_threshold(config[CONF_STATIONARY_THRESHOLD]))

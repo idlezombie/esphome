@@ -38,8 +38,7 @@ class MPU6050Tilt : public PollingComponent, public i2c::I2CDevice {
   void set_closed_angle(float angle) { closed_angle_ = angle; }
   void set_open_angle(float angle) { open_angle_ = angle; }
   void set_smoothing_factor(float factor) { smoothing_factor_ = factor; }
-  void set_deadband_threshold(float threshold) { deadband_threshold_ = threshold; }
-  void set_position_deadband_threshold(float threshold) { position_deadband_threshold_ = threshold; }
+  void set_stationary_threshold(float threshold) { stationary_threshold_ = threshold; }
 
  protected:
   // Internal helpers
@@ -59,17 +58,15 @@ class MPU6050Tilt : public PollingComponent, public i2c::I2CDevice {
   float angle_y_{0.0f};
   float angle_z_{0.0f};
 
-  // Last published values (for deadband) - initialized to sentinel value
+  // Stationary detection and locked values
+  float locked_angle_x_{9999.0f};
+  float locked_angle_y_{9999.0f};
   float last_published_x_{9999.0f};
   float last_published_y_{9999.0f};
   float last_published_z_{9999.0f};
   float last_published_position_{9999.0f};
-
-  // Stability tracking - only publish after consistent readings
-  float stable_angle_x_{9999.0f};
-  float stable_angle_y_{9999.0f};
-  int stable_count_x_{0};
-  int stable_count_y_{0};
+  int stationary_count_{0};
+  bool is_stationary_{false};
 
   // Configuration
   uint8_t axis_index_{0};   // 0: X, 1: Y
@@ -88,8 +85,7 @@ class MPU6050Tilt : public PollingComponent, public i2c::I2CDevice {
 
   // Noise reduction parameters
   float smoothing_factor_{0.9f};         // Exponential smoothing (0-1, higher = more smoothing)
-  float deadband_threshold_{0.3f};       // Minimum change to publish (degrees) - increased default
-  float position_deadband_threshold_{3.0f}; // Minimum position change to publish (%) - increased default
+  float stationary_threshold_{0.1f};     // Gyro threshold to detect stationary (dps)
 
   // Output sensors
   sensor::Sensor *angle_x_sensor_{nullptr};
