@@ -126,28 +126,74 @@ void MPU6050Tilt::update() {
   angle_y_ = this->smoothing_factor_ * angle_y_ + (1 - this->smoothing_factor_) * filtered_y;
   angle_z_ = filtered_z;  // Z doesn't need extra smoothing
 
-  // Position calculation based on configured axis and open/closed angles
-  this->compute_position_();
+  // Stability check: only publish if reading has been stable for multiple cycles
+  bool angle_changed = false;
+  const float stability_threshold = this->deadband_threshold_ * 0.5f;  // Half of deadband for stability check
+  const int required_stable_cycles = 3;  // Require 3 consistent readings before publishing
 
-  // Publish only if change exceeds deadband threshold
+  // Check X angle stability
   if (this->angle_x_sensor_ != nullptr) {
-    if (fabs(angle_x_ - last_published_x_) >= this->deadband_threshold_) {
+    if (fabs(angle_x_ - stable_angle_x_) <= stability_threshold) {
+      stable_count_x_++;
+    } else {
+      stable_angle_x_ = angle_x_;
+      stable_count_x_ = 0;
+    }
+
+    // Only publish if stable AND exceeds deadband from last published value
+    if (stable_count_x_ >= required_stable_cycles && 
+        fabs(angle_x_ - last_published_x_) >= this->deadband_threshold_) {
       this->angle_x_sensor_->publish_state(angle_x_);
       last_published_x_ = angle_x_;
+      stable_angle_x_ = angle_x_;
+      stable_count_x_ = 0;
+      angle_changed = true;
     }
   }
 
+  // Check Y angle stability
   if (this->angle_y_sensor_ != nullptr) {
-    if (fabs(angle_y_ - last_published_y_) >= this->deadband_threshold_) {
+    if (fabs(angle_y_ - stable_angle_y_) <= stability_threshold) {
+      stable_count_y_++;
+    } else {
+      stable_angle_y_ = angle_y_;
+      stable_count_y_ = 0;
+    }
+
+    // Only publish if stable AND exceeds deadband from last published value
+    if (stable_count_y_ >= required_stable_cycles && 
+        fabs(angle_y_ - last_published_y_) >= this->deadband_threshold_) {
       this->angle_y_sensor_->publish_state(angle_y_);
       last_published_y_ = angle_y_;
+      stable_angle_y_ = angle_y_;
+      stable_count_y_ = 0;
+      angle_changed = true;
     }
   }
 
+  // Z angle (no stability check, just deadband)
   if (this->angle_z_sensor_ != nullptr) {
     if (fabs(angle_z_ - last_published_z_) >= this->deadband_threshold_) {
       this->angle_z_sensor_->publish_state(angle_z_);
       last_published_z_ = angle_z_;
+    }
+  }
+
+  // Only compute and publish position if angle changed enough
+  if (angle_changed && this->position_sensor_ != nullptr) {
+    float angle = (this->axis_index_ == 0) ? this->angle_x_ : this->angle_y_;
+    float position = (angle - this->closed_angle_) /
+                     (this->open_angle_ - this->closed_angle_) * 100.0f;
+
+    if (position < 0.0f)
+      position = 0.0f;
+    if (position > 100.0f)
+      position = 100.0f;
+
+    // Apply deadband to position with higher threshold
+    if (fabs(position - last_published_position_) >= this->position_deadband_threshold_) {
+      this->position_sensor_->publish_state(position);
+      last_published_position_ = position;
     }
   }
 }
