@@ -40,6 +40,7 @@ class MPU6050Tilt : public PollingComponent, public i2c::I2CDevice {
 
   // Configuration setters (called from Python)
   void set_axis_index(uint8_t axis) { axis_index_ = axis; }
+  void set_tilt_gyro_axis(uint8_t axis) { tilt_gyro_axis_ = axis; }  // 0=X, 1=Y, 2=Z
   void set_accel_fs_sel(uint8_t fs) { accel_fs_sel_ = fs; }
   void set_gyro_fs_sel(uint8_t fs) { gyro_fs_sel_ = fs; }
   void set_dlpf_cfg(uint8_t cfg) { dlpf_cfg_ = cfg; }
@@ -66,6 +67,11 @@ class MPU6050Tilt : public PollingComponent, public i2c::I2CDevice {
   float angle_y_{0.0f};
   float angle_z_{0.0f};
 
+  // Tilt angle used for position (configurable accel formula + gyro axis)
+  float tilt_angle_{0.0f};
+  float locked_tilt_angle_{9999.0f};
+  float last_published_tilt_{9999.0f};
+
   // Stationary detection and locked values
   float locked_angle_x_{9999.0f};
   float locked_angle_y_{9999.0f};
@@ -77,8 +83,9 @@ class MPU6050Tilt : public PollingComponent, public i2c::I2CDevice {
   bool is_stationary_{false};
 
   // Configuration
-  uint8_t axis_index_{0};   // 0: X, 1: Y
-  uint8_t accel_fs_sel_{1}; // default ±4g
+  uint8_t axis_index_{0};      // 0: X (angle from ay,az), 1: Y (angle from ax,ay,az)
+  uint8_t tilt_gyro_axis_{1};  // 0=X, 1=Y, 2=Z - which gyro axis for tilt/position
+  uint8_t accel_fs_sel_{1};   // default ±4g
   uint8_t gyro_fs_sel_{1};  // default ±500 dps
   uint8_t dlpf_cfg_{4};     // default ~20Hz bandwidth
 

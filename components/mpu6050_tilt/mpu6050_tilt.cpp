@@ -123,58 +123,64 @@ void MPU6050Tilt::update() {
   if (this->raw_gyro_z_sensor_ != nullptr)
     this->raw_gyro_z_sensor_->publish_state(gz);
 
-  // Compute accelerometer angles
+  // Compute accelerometer angles (both formulas; which one is used for position is configurable)
+  // angle_x = tilt in plane of Y,Z (uses accel Y and Z - smooth when Z is primary)
+  // angle_y = tilt in plane involving X (uses accel X,Y,Z - noisy if X is erratic)
   float accel_angle_x = atan2(ay, az) * 180.0f / M_PI;
   float accel_angle_y = atan2(-ax, sqrt(ay * ay + az * az)) * 180.0f / M_PI;
 
-  // Complementary filter
   const float alpha = 0.98f;
   const float dt = this->update_interval_ / 1000.0f;
 
+  // Fixed formulas for optional angle_x / angle_y sensors (backward compat)
   float filtered_x = alpha * (angle_x_ + gx * dt) + (1 - alpha) * accel_angle_x;
   float filtered_y = alpha * (angle_y_ + gy * dt) + (1 - alpha) * accel_angle_y;
-  float filtered_z = angle_z_ + gz * dt;  // no accel reference for Z
-
-  // Additional exponential smoothing for noise reduction
   angle_x_ = this->smoothing_factor_ * angle_x_ + (1 - this->smoothing_factor_) * filtered_x;
   angle_y_ = this->smoothing_factor_ * angle_y_ + (1 - this->smoothing_factor_) * filtered_y;
-  angle_z_ = filtered_z;  // Z doesn't need extra smoothing
+
+  float filtered_z = angle_z_ + gz * dt;
+  angle_z_ = filtered_z;
+
+  // Tilt for position: use selected accel angle formula + selected gyro axis
+  float tilt_accel = (this->axis_index_ == 0) ? accel_angle_x : accel_angle_y;
+  float tilt_gyro = (this->tilt_gyro_axis_ == 0) ? gx : ((this->tilt_gyro_axis_ == 1) ? gy : gz);
+  float filtered_tilt = alpha * (tilt_angle_ + tilt_gyro * dt) + (1 - alpha) * tilt_accel;
+  tilt_angle_ = this->smoothing_factor_ * tilt_angle_ + (1 - this->smoothing_factor_) * filtered_tilt;
 
   // Stationary detection: check if gyro readings indicate device is not moving
   float gyro_magnitude = sqrt(gx * gx + gy * gy + gz * gz);
-  const int required_stationary_cycles = 10;  // Require 10 cycles (~500ms at 50ms interval) of stillness
-  
+  const int required_stationary_cycles = 10;
+
   if (gyro_magnitude < this->stationary_threshold_) {
     stationary_count_++;
     if (stationary_count_ >= required_stationary_cycles && !is_stationary_) {
-      // Device has been stationary - lock to ACCELEROMETER angles (gravity truth),
-      // not the integrated filter state which can have gyro drift. Also reset
-      // filter state to accel so internal state doesn't keep drifting.
       is_stationary_ = true;
       locked_angle_x_ = accel_angle_x;
       locked_angle_y_ = accel_angle_y;
+      locked_tilt_angle_ = tilt_accel;
       angle_x_ = accel_angle_x;
       angle_y_ = accel_angle_y;
+      tilt_angle_ = tilt_accel;
     }
   } else {
-    // Device is moving - unlock and reset counter
     stationary_count_ = 0;
     if (is_stationary_) {
       is_stationary_ = false;
-      locked_angle_x_ = 9999.0f;  // Reset locked values
+      locked_angle_x_ = 9999.0f;
       locked_angle_y_ = 9999.0f;
+      locked_tilt_angle_ = 9999.0f;
     }
   }
 
-  // Publish logic: when stationary, publish locked values (prevents drift);
-  // when moving, publish current filtered values
+  // Publish: selected axis (for position) uses configurable tilt; other uses fixed formula
   bool angle_changed = false;
-  const float publish_threshold = 0.05f;  // Small threshold to prevent jitter when moving
-  
+  const float publish_threshold = 0.05f;
+
+  float tilt_to_publish = is_stationary_ ? locked_tilt_angle_ : tilt_angle_;
+
   if (this->angle_x_sensor_ != nullptr) {
-    float value_to_publish = is_stationary_ ? locked_angle_x_ : angle_x_;
-    // Only publish if value changed (when moving) or first time (when stationary)
-    if (fabs(value_to_publish - last_published_x_) >= publish_threshold || 
+    float value_to_publish = (this->axis_index_ == 0) ? tilt_to_publish : angle_x_;
+    if (fabs(value_to_publish - last_published_x_) >= publish_threshold ||
         (is_stationary_ && last_published_x_ == 9999.0f)) {
       this->angle_x_sensor_->publish_state(value_to_publish);
       last_published_x_ = value_to_publish;
@@ -183,9 +189,8 @@ void MPU6050Tilt::update() {
   }
 
   if (this->angle_y_sensor_ != nullptr) {
-    float value_to_publish = is_stationary_ ? locked_angle_y_ : angle_y_;
-    // Only publish if value changed (when moving) or first time (when stationary)
-    if (fabs(value_to_publish - last_published_y_) >= publish_threshold || 
+    float value_to_publish = (this->axis_index_ == 1) ? tilt_to_publish : angle_y_;
+    if (fabs(value_to_publish - last_published_y_) >= publish_threshold ||
         (is_stationary_ && last_published_y_ == 9999.0f)) {
       this->angle_y_sensor_->publish_state(value_to_publish);
       last_published_y_ = value_to_publish;
@@ -200,11 +205,9 @@ void MPU6050Tilt::update() {
     }
   }
 
-  // Position calculation
+  // Position calculation (uses configurable tilt angle)
   if (angle_changed && this->position_sensor_ != nullptr) {
-    float angle = (this->axis_index_ == 0) ? 
-                  (is_stationary_ ? locked_angle_x_ : angle_x_) : 
-                  (is_stationary_ ? locked_angle_y_ : angle_y_);
+    float angle = tilt_to_publish;
     float position = (angle - this->closed_angle_) /
                      (this->open_angle_ - this->closed_angle_) * 100.0f;
 

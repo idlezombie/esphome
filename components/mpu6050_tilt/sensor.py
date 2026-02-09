@@ -25,7 +25,8 @@ CONF_RAW_GYRO_Y = "raw_gyro_y"
 CONF_RAW_GYRO_Z = "raw_gyro_z"
 
 # Configuration options
-CONF_AXIS = "axis"
+CONF_AXIS = "axis"  # which accel angle formula: x = atan2(ay,az), y = atan2(-ax,...)
+CONF_TILT_GYRO_AXIS = "tilt_gyro_axis"  # which gyro axis for tilt/position: x, y, z
 CONF_ACCEL_RANGE = "accel_range"
 CONF_GYRO_RANGE = "gyro_range"
 CONF_DLPF = "dlpf"
@@ -65,8 +66,13 @@ RAW_GYRO_SENSOR_SCHEMA = sensor.sensor_schema(
 
 
 def _axis_to_index(axis: str) -> int:
-    # 0 -> X, 1 -> Y
+    # 0 -> X (angle from ay,az), 1 -> Y (angle from ax,ay,az)
     return 0 if axis.lower() == "x" else 1
+
+
+def _gyro_axis_to_index(axis: str) -> int:
+    # 0 -> X, 1 -> Y, 2 -> Z
+    return {"x": 0, "y": 1, "z": 2}[axis.lower()]
 
 
 def _accel_range_to_fs_sel(val: str) -> int:
@@ -115,6 +121,9 @@ CONFIG_SCHEMA = (
             cv.Optional(CONF_ANGLE_Z): ANGLE_SENSOR_SCHEMA,
             cv.Optional(CONF_POSITION): POSITION_SENSOR_SCHEMA,
             cv.Optional(CONF_AXIS, default="x"): cv.one_of("x", "y", lower=True),
+            cv.Optional(CONF_TILT_GYRO_AXIS, default="y"): cv.one_of(
+                "x", "y", "z", lower=True
+            ),
             cv.Optional(CONF_ACCEL_RANGE, default="4g"): cv.one_of(
                 "2g", "4g", "8g", "16g", lower=True
             ),
@@ -190,9 +199,11 @@ async def to_code(config):
         sens = await sensor.new_sensor(config[CONF_RAW_GYRO_Z])
         cg.add(var.set_raw_gyro_z_sensor(sens))
 
-    # Axis selection for louvre position
+    # Tilt/position axis: which accel angle formula and which gyro axis
     axis_idx = _axis_to_index(config[CONF_AXIS])
     cg.add(var.set_axis_index(axis_idx))
+    gyro_axis_idx = _gyro_axis_to_index(config[CONF_TILT_GYRO_AXIS])
+    cg.add(var.set_tilt_gyro_axis(gyro_axis_idx))
 
     # Hardware configuration
     accel_fs = _accel_range_to_fs_sel(config[CONF_ACCEL_RANGE])
