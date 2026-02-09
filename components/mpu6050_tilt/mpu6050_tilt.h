@@ -37,6 +37,8 @@ class MPU6050Tilt : public PollingComponent, public i2c::I2CDevice {
   void set_dlpf_cfg(uint8_t cfg) { dlpf_cfg_ = cfg; }
   void set_closed_angle(float angle) { closed_angle_ = angle; }
   void set_open_angle(float angle) { open_angle_ = angle; }
+  void set_smoothing_factor(float factor) { smoothing_factor_ = factor; }
+  void set_deadband_threshold(float threshold) { deadband_threshold_ = threshold; }
 
  protected:
   // Internal helpers
@@ -56,6 +58,11 @@ class MPU6050Tilt : public PollingComponent, public i2c::I2CDevice {
   float angle_y_{0.0f};
   float angle_z_{0.0f};
 
+  // Last published values (for deadband)
+  float last_published_x_{0.0f};
+  float last_published_y_{0.0f};
+  float last_published_z_{0.0f};
+
   // Configuration
   uint8_t axis_index_{0};   // 0: X, 1: Y
   uint8_t accel_fs_sel_{1}; // default ±4g
@@ -70,6 +77,10 @@ class MPU6050Tilt : public PollingComponent, public i2c::I2CDevice {
 
   // Setup state tracking
   bool setup_complete_{false};
+
+  // Noise reduction parameters
+  float smoothing_factor_{0.8f};    // Exponential smoothing (0-1, higher = more smoothing)
+  float deadband_threshold_{0.1f};  // Minimum change to publish (degrees)
 
   // Output sensors
   sensor::Sensor *angle_x_sensor_{nullptr};

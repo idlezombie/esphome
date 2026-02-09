@@ -117,22 +117,39 @@ void MPU6050Tilt::update() {
   const float alpha = 0.98f;
   const float dt = this->update_interval_ / 1000.0f;
 
-  angle_x_ = alpha * (angle_x_ + gx * dt) + (1 - alpha) * accel_angle_x;
-  angle_y_ = alpha * (angle_y_ + gy * dt) + (1 - alpha) * accel_angle_y;
-  angle_z_ += gz * dt;  // no accel reference for Z
+  float filtered_x = alpha * (angle_x_ + gx * dt) + (1 - alpha) * accel_angle_x;
+  float filtered_y = alpha * (angle_y_ + gy * dt) + (1 - alpha) * accel_angle_y;
+  float filtered_z = angle_z_ + gz * dt;  // no accel reference for Z
+
+  // Additional exponential smoothing for noise reduction
+  angle_x_ = this->smoothing_factor_ * angle_x_ + (1 - this->smoothing_factor_) * filtered_x;
+  angle_y_ = this->smoothing_factor_ * angle_y_ + (1 - this->smoothing_factor_) * filtered_y;
+  angle_z_ = filtered_z;  // Z doesn't need extra smoothing
 
   // Position calculation based on configured axis and open/closed angles
   this->compute_position_();
 
-  // Publish
-  if (this->angle_x_sensor_ != nullptr)
-    this->angle_x_sensor_->publish_state(angle_x_);
+  // Publish only if change exceeds deadband threshold
+  if (this->angle_x_sensor_ != nullptr) {
+    if (fabs(angle_x_ - last_published_x_) >= this->deadband_threshold_) {
+      this->angle_x_sensor_->publish_state(angle_x_);
+      last_published_x_ = angle_x_;
+    }
+  }
 
-  if (this->angle_y_sensor_ != nullptr)
-    this->angle_y_sensor_->publish_state(angle_y_);
+  if (this->angle_y_sensor_ != nullptr) {
+    if (fabs(angle_y_ - last_published_y_) >= this->deadband_threshold_) {
+      this->angle_y_sensor_->publish_state(angle_y_);
+      last_published_y_ = angle_y_;
+    }
+  }
 
-  if (this->angle_z_sensor_ != nullptr)
-    this->angle_z_sensor_->publish_state(angle_z_);
+  if (this->angle_z_sensor_ != nullptr) {
+    if (fabs(angle_z_ - last_published_z_) >= this->deadband_threshold_) {
+      this->angle_z_sensor_->publish_state(angle_z_);
+      last_published_z_ = angle_z_;
+    }
+  }
 }
 
 bool MPU6050Tilt::configure_mpu_() {
