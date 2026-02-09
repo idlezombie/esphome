@@ -10,7 +10,7 @@ namespace mpu6050_tilt {
 class MPU6050Tilt : public PollingComponent, public i2c::I2CDevice {
  public:
   // Constructor
-  MPU6050Tilt() = default;
+  MPU6050Tilt();
 
   // Setup and update
   void setup() override;
@@ -67,6 +67,9 @@ class MPU6050Tilt : public PollingComponent, public i2c::I2CDevice {
 
   float closed_angle_{0.0f};
   float open_angle_{90.0f};
+
+  // Setup state tracking
+  bool setup_complete_{false};
 
   // Output sensors
   sensor::Sensor *angle_x_sensor_{nullptr};

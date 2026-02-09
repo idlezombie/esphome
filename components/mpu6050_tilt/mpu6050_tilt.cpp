@@ -1,6 +1,8 @@
 #include "mpu6050_tilt.h"
 #include "esphome/core/log.h"
 #include <cmath>
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 
 namespace esphome {
 namespace mpu6050_tilt {
@@ -16,27 +18,33 @@ static const uint8_t MPU6050_REG_ACCEL_CONFIG = 0x1C;
 static const uint8_t MPU6050_REG_ACCEL_XOUT_H = 0x3B;
 static const uint8_t MPU6050_REG_GYRO_XOUT_H = 0x43;
 
+MPU6050Tilt::MPU6050Tilt() {
+  this->setup_complete_ = false;
+}
+
 void MPU6050Tilt::setup() {
-  ESP_LOGI(TAG, "Initializing MPU6050...");
+  PollingComponent::setup();
 
   // Wake up the MPU6050
-  if (this->write_byte(MPU6050_REG_PWR_MGMT_1, 0x00) != i2c::ERROR_OK) {
+  if (!this->write_byte(MPU6050_REG_PWR_MGMT_1, 0x00)) {
     ESP_LOGE(TAG, "Failed to wake MPU6050");
     this->mark_failed();
     return;
   }
+  vTaskDelay(pdMS_TO_TICKS(100));
 
   if (!this->configure_mpu_()) {
+    ESP_LOGE(TAG, "Failed to configure MPU6050");
     this->mark_failed();
     return;
   }
-
+  
+  vTaskDelay(pdMS_TO_TICKS(200));
   this->calibrate();
+  this->setup_complete_ = true;
 }
 
 void MPU6050Tilt::calibrate() {
-  ESP_LOGI(TAG, "Calibrating MPU6050... keep device still");
-
   int32_t sum_ax = 0, sum_ay = 0, sum_az = 0;
   int32_t sum_gx = 0, sum_gy = 0, sum_gz = 0;
 
@@ -55,25 +63,21 @@ void MPU6050Tilt::calibrate() {
     sum_gy += gy;
     sum_gz += gz;
 
-    vTaskDelay(1 / portTICK_PERIOD_MS);
+    vTaskDelay(pdMS_TO_TICKS(1));
   }
 
   offset_ax_ = sum_ax / samples;
   offset_ay_ = sum_ay / samples;
-  // For tilt use, keep gravity as part of the reference; no hard subtraction here.
   offset_az_ = sum_az / samples;
   offset_gx_ = sum_gx / samples;
   offset_gy_ = sum_gy / samples;
   offset_gz_ = sum_gz / samples;
-
-  ESP_LOGI(TAG, "Calibration complete");
 }
 
 bool MPU6050Tilt::read_raw(int16_t &ax, int16_t &ay, int16_t &az,
                            int16_t &gx, int16_t &gy, int16_t &gz) {
   uint8_t data[14];
-  if (this->read_bytes(MPU6050_REG_ACCEL_XOUT_H, data, 14) != i2c::ERROR_OK) {
-    ESP_LOGW(TAG, "Failed to read MPU6050 data");
+  if (!this->read_bytes(MPU6050_REG_ACCEL_XOUT_H, data, 14)) {
     return false;
   }
 
@@ -87,6 +91,10 @@ bool MPU6050Tilt::read_raw(int16_t &ax, int16_t &ay, int16_t &az,
 }
 
 void MPU6050Tilt::update() {
+  if (!this->setup_complete_) {
+    return;
+  }
+
   int16_t raw_ax, raw_ay, raw_az, raw_gx, raw_gy, raw_gz;
   if (!this->read_raw(raw_ax, raw_ay, raw_az, raw_gx, raw_gy, raw_gz)) {
     return;
@@ -166,25 +174,27 @@ bool MPU6050Tilt::configure_mpu_() {
   }
 
   // Configure DLPF
-  if (this->write_byte(MPU6050_REG_CONFIG, this->dlpf_cfg_) != i2c::ERROR_OK) {
+  if (!this->write_byte(MPU6050_REG_CONFIG, this->dlpf_cfg_)) {
     ESP_LOGE(TAG, "Failed to configure DLPF");
     return false;
   }
 
   // Configure gyro full-scale range
-  if (this->write_byte(MPU6050_REG_GYRO_CONFIG, this->gyro_fs_sel_ << 3) != i2c::ERROR_OK) {
+  uint8_t gyro_val = this->gyro_fs_sel_ << 3;
+  if (!this->write_byte(MPU6050_REG_GYRO_CONFIG, gyro_val)) {
     ESP_LOGE(TAG, "Failed to configure gyro range");
     return false;
   }
 
   // Configure accel full-scale range
-  if (this->write_byte(MPU6050_REG_ACCEL_CONFIG, this->accel_fs_sel_ << 3) != i2c::ERROR_OK) {
+  uint8_t accel_val = this->accel_fs_sel_ << 3;
+  if (!this->write_byte(MPU6050_REG_ACCEL_CONFIG, accel_val)) {
     ESP_LOGE(TAG, "Failed to configure accel range");
     return false;
   }
 
   // Set sample rate divider to 0 (use internal rate / (1 + 0))
-  if (this->write_byte(MPU6050_REG_SMPLRT_DIV, 0x00) != i2c::ERROR_OK) {
+  if (!this->write_byte(MPU6050_REG_SMPLRT_DIV, 0x00)) {
     ESP_LOGE(TAG, "Failed to configure sample rate");
     return false;
   }

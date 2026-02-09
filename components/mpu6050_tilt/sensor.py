@@ -107,13 +107,16 @@ CONFIG_SCHEMA = (
     )
     .extend(cv.polling_component_schema("50ms"))
     .extend(i2c.i2c_device_schema(0x68))
+    .extend(cv.COMPONENT_SCHEMA)
 )
 
 
 async def to_code(config):
     var = cg.new_Pvariable(config[CONF_ID])
-    await cg.register_component(var, config)
     await i2c.register_i2c_device(var, config)
+    
+    # Register as component FIRST, before setting up sensors
+    await cg.register_component(var, config)
 
     # Angles
     if CONF_ANGLE_X in config:
