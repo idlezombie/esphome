@@ -18,6 +18,10 @@ static const uint8_t MPU6050_REG_ACCEL_CONFIG = 0x1C;
 static const uint8_t MPU6050_REG_ACCEL_XOUT_H = 0x3B;
 static const uint8_t MPU6050_REG_GYRO_XOUT_H = 0x43;
 
+// Reduce sensitivity: only publish when value changes by at least this much
+static const float ANGLE_REPORT_THRESHOLD = 1.0f;   // degrees
+static const float POSITION_REPORT_THRESHOLD = 1.0f; // percent
+
 MPU6050Tilt::MPU6050Tilt() {
   this->setup_complete_ = false;
 }
@@ -25,7 +29,6 @@ MPU6050Tilt::MPU6050Tilt() {
 void MPU6050Tilt::setup() {
   PollingComponent::setup();
 
-  // Wake up the MPU6050
   if (!this->write_byte(MPU6050_REG_PWR_MGMT_1, 0x00)) {
     ESP_LOGE(TAG, "Failed to wake MPU6050");
     this->mark_failed();
@@ -38,7 +41,7 @@ void MPU6050Tilt::setup() {
     this->mark_failed();
     return;
   }
-  
+
   vTaskDelay(pdMS_TO_TICKS(200));
   this->calibrate();
   this->setup_complete_ = true;
@@ -100,7 +103,6 @@ void MPU6050Tilt::update() {
     return;
   }
 
-  // Apply calibration offsets
   float ax = (raw_ax - offset_ax_) / accel_scale_;
   float ay = (raw_ay - offset_ay_) / accel_scale_;
   float az = (raw_az - offset_az_) / accel_scale_;
@@ -109,7 +111,7 @@ void MPU6050Tilt::update() {
   float gy = (raw_gy - offset_gy_) / gyro_scale_;
   float gz = (raw_gz - offset_gz_) / gyro_scale_;
 
-  // Publish raw (calibrated) accel and gyro for diagnostics
+  // Raw diagnostics (unchanged)
   if (this->raw_accel_x_sensor_ != nullptr)
     this->raw_accel_x_sensor_->publish_state(ax);
   if (this->raw_accel_y_sensor_ != nullptr)
@@ -123,166 +125,96 @@ void MPU6050Tilt::update() {
   if (this->raw_gyro_z_sensor_ != nullptr)
     this->raw_gyro_z_sensor_->publish_state(gz);
 
-  // Compute accelerometer angles (both formulas; which one is used for position is configurable)
-  // angle_x = tilt in plane of Y,Z (uses accel Y and Z - smooth when Z is primary)
-  // angle_y = tilt in plane involving X (uses accel X,Y,Z - noisy if X is erratic)
+  // Accelerometer tilt angles (angle_x uses Y,Z; angle_y uses X,Y,Z)
   float accel_angle_x = atan2(ay, az) * 180.0f / M_PI;
   float accel_angle_y = atan2(-ax, sqrt(ay * ay + az * az)) * 180.0f / M_PI;
 
   const float alpha = 0.98f;
   const float dt = this->update_interval_ / 1000.0f;
 
-  // Fixed formulas for optional angle_x / angle_y sensors (backward compat)
-  float filtered_x = alpha * (angle_x_ + gx * dt) + (1 - alpha) * accel_angle_x;
-  float filtered_y = alpha * (angle_y_ + gy * dt) + (1 - alpha) * accel_angle_y;
-  angle_x_ = this->smoothing_factor_ * angle_x_ + (1 - this->smoothing_factor_) * filtered_x;
-  angle_y_ = this->smoothing_factor_ * angle_y_ + (1 - this->smoothing_factor_) * filtered_y;
+  // Single complementary filter per angle (no extra smoothing, no locking)
+  angle_x_ = alpha * (angle_x_ + gx * dt) + (1 - alpha) * accel_angle_x;
+  angle_y_ = alpha * (angle_y_ + gy * dt) + (1 - alpha) * accel_angle_y;
+  angle_z_ = angle_z_ + gz * dt;
 
-  float filtered_z = angle_z_ + gz * dt;
-  angle_z_ = filtered_z;
+  // Reduce sensitivity: round to 1 decimal for angle, then only publish if change >= threshold
+  float angle_used = (this->axis_index_ == 0) ? angle_x_ : angle_y_;
+  float angle_rounded = roundf(angle_used * 10.0f) / 10.0f;
 
-  // Tilt for position: use selected accel angle formula + selected gyro axis
-  float tilt_accel = (this->axis_index_ == 0) ? accel_angle_x : accel_angle_y;
-  float tilt_gyro = (this->tilt_gyro_axis_ == 0) ? gx : ((this->tilt_gyro_axis_ == 1) ? gy : gz);
-  float filtered_tilt = alpha * (tilt_angle_ + tilt_gyro * dt) + (1 - alpha) * tilt_accel;
-  tilt_angle_ = this->smoothing_factor_ * tilt_angle_ + (1 - this->smoothing_factor_) * filtered_tilt;
-
-  // Stationary detection: check if gyro readings indicate device is not moving
-  float gyro_magnitude = sqrt(gx * gx + gy * gy + gz * gz);
-  const int required_stationary_cycles = 10;
-
-  if (gyro_magnitude < this->stationary_threshold_) {
-    stationary_count_++;
-    if (stationary_count_ >= required_stationary_cycles && !is_stationary_) {
-      is_stationary_ = true;
-      locked_angle_x_ = accel_angle_x;
-      locked_angle_y_ = accel_angle_y;
-      locked_tilt_angle_ = tilt_accel;
-      angle_x_ = accel_angle_x;
-      angle_y_ = accel_angle_y;
-      tilt_angle_ = tilt_accel;
-    }
-  } else {
-    stationary_count_ = 0;
-    if (is_stationary_) {
-      is_stationary_ = false;
-      locked_angle_x_ = 9999.0f;
-      locked_angle_y_ = 9999.0f;
-      locked_tilt_angle_ = 9999.0f;
-    }
-  }
-
-  // Publish: selected axis (for position) uses configurable tilt; other uses fixed formula
-  bool angle_changed = false;
-  const float publish_threshold = 0.05f;
-
-  float tilt_to_publish = is_stationary_ ? locked_tilt_angle_ : tilt_angle_;
+  const float unset = 9999.0f;
 
   if (this->angle_x_sensor_ != nullptr) {
-    float value_to_publish = (this->axis_index_ == 0) ? tilt_to_publish : angle_x_;
-    if (fabs(value_to_publish - last_published_x_) >= publish_threshold ||
-        (is_stationary_ && last_published_x_ == 9999.0f)) {
-      this->angle_x_sensor_->publish_state(value_to_publish);
-      last_published_x_ = value_to_publish;
-      angle_changed = true;
+    float val = (this->axis_index_ == 0) ? angle_rounded : (roundf(angle_x_ * 10.0f) / 10.0f);
+    if (last_published_x_ == unset || fabsf(val - last_published_x_) >= ANGLE_REPORT_THRESHOLD) {
+      this->angle_x_sensor_->publish_state(val);
+      last_published_x_ = val;
     }
   }
 
   if (this->angle_y_sensor_ != nullptr) {
-    float value_to_publish = (this->axis_index_ == 1) ? tilt_to_publish : angle_y_;
-    if (fabs(value_to_publish - last_published_y_) >= publish_threshold ||
-        (is_stationary_ && last_published_y_ == 9999.0f)) {
-      this->angle_y_sensor_->publish_state(value_to_publish);
-      last_published_y_ = value_to_publish;
-      angle_changed = true;
+    float val = (this->axis_index_ == 1) ? angle_rounded : (roundf(angle_y_ * 10.0f) / 10.0f);
+    if (last_published_y_ == unset || fabsf(val - last_published_y_) >= ANGLE_REPORT_THRESHOLD) {
+      this->angle_y_sensor_->publish_state(val);
+      last_published_y_ = val;
     }
   }
 
   if (this->angle_z_sensor_ != nullptr) {
-    if (fabs(angle_z_ - last_published_z_) >= publish_threshold || last_published_z_ == 9999.0f) {
-      this->angle_z_sensor_->publish_state(angle_z_);
-      last_published_z_ = angle_z_;
+    float val = roundf(angle_z_ * 10.0f) / 10.0f;
+    if (last_published_z_ == unset || fabsf(val - last_published_z_) >= ANGLE_REPORT_THRESHOLD) {
+      this->angle_z_sensor_->publish_state(val);
+      last_published_z_ = val;
     }
   }
 
-  // Position calculation (uses configurable tilt angle)
-  if (angle_changed && this->position_sensor_ != nullptr) {
-    float angle = tilt_to_publish;
-    float position = (angle - this->closed_angle_) /
+  // Position: from selected angle, rounded to integer percent; publish only if change >= 1%
+  if (this->position_sensor_ != nullptr && this->open_angle_ != this->closed_angle_) {
+    float position = (angle_rounded - this->closed_angle_) /
                      (this->open_angle_ - this->closed_angle_) * 100.0f;
+    if (position < 0.0f) position = 0.0f;
+    if (position > 100.0f) position = 100.0f;
+    float position_rounded = roundf(position);
 
-    if (position < 0.0f)
-      position = 0.0f;
-    if (position > 100.0f)
-      position = 100.0f;
-
-    // Only publish position if it changed
-    if (fabs(position - last_published_position_) >= 0.5f || last_published_position_ == 9999.0f) {
-      this->position_sensor_->publish_state(position);
-      last_published_position_ = position;
+    if (last_published_position_ == unset ||
+        fabsf(position_rounded - last_published_position_) >= POSITION_REPORT_THRESHOLD) {
+      this->position_sensor_->publish_state(position_rounded);
+      last_published_position_ = position_rounded;
     }
   }
 }
 
 bool MPU6050Tilt::configure_mpu_() {
-  // Compute scale factors from FS_SEL settings
   switch (this->accel_fs_sel_) {
-    case 0: // ±2g
-      this->accel_scale_ = 16384.0f;
-      break;
-    case 1: // ±4g
-      this->accel_scale_ = 8192.0f;
-      break;
-    case 2: // ±8g
-      this->accel_scale_ = 4096.0f;
-      break;
-    case 3: // ±16g
-      this->accel_scale_ = 2048.0f;
-      break;
-    default:
-      this->accel_scale_ = 8192.0f;  // safe default ±4g
-      break;
+    case 0: this->accel_scale_ = 16384.0f; break;
+    case 1: this->accel_scale_ = 8192.0f; break;
+    case 2: this->accel_scale_ = 4096.0f; break;
+    case 3: this->accel_scale_ = 2048.0f; break;
+    default: this->accel_scale_ = 8192.0f; break;
   }
 
   switch (this->gyro_fs_sel_) {
-    case 0: // ±250 dps
-      this->gyro_scale_ = 131.0f;
-      break;
-    case 1: // ±500 dps
-      this->gyro_scale_ = 65.5f;
-      break;
-    case 2: // ±1000 dps
-      this->gyro_scale_ = 32.8f;
-      break;
-    case 3: // ±2000 dps
-      this->gyro_scale_ = 16.4f;
-      break;
-    default:
-      this->gyro_scale_ = 65.5f;  // safe default ±500 dps
-      break;
+    case 0: this->gyro_scale_ = 131.0f; break;
+    case 1: this->gyro_scale_ = 65.5f; break;
+    case 2: this->gyro_scale_ = 32.8f; break;
+    case 3: this->gyro_scale_ = 16.4f; break;
+    default: this->gyro_scale_ = 65.5f; break;
   }
 
-  // Configure DLPF
   if (!this->write_byte(MPU6050_REG_CONFIG, this->dlpf_cfg_)) {
     ESP_LOGE(TAG, "Failed to configure DLPF");
     return false;
   }
 
-  // Configure gyro full-scale range
-  uint8_t gyro_val = this->gyro_fs_sel_ << 3;
-  if (!this->write_byte(MPU6050_REG_GYRO_CONFIG, gyro_val)) {
+  if (!this->write_byte(MPU6050_REG_GYRO_CONFIG, this->gyro_fs_sel_ << 3)) {
     ESP_LOGE(TAG, "Failed to configure gyro range");
     return false;
   }
 
-  // Configure accel full-scale range
-  uint8_t accel_val = this->accel_fs_sel_ << 3;
-  if (!this->write_byte(MPU6050_REG_ACCEL_CONFIG, accel_val)) {
+  if (!this->write_byte(MPU6050_REG_ACCEL_CONFIG, this->accel_fs_sel_ << 3)) {
     ESP_LOGE(TAG, "Failed to configure accel range");
     return false;
   }
 
-  // Set sample rate divider to 0 (use internal rate / (1 + 0))
   if (!this->write_byte(MPU6050_REG_SMPLRT_DIV, 0x00)) {
     ESP_LOGE(TAG, "Failed to configure sample rate");
     return false;
@@ -292,23 +224,17 @@ bool MPU6050Tilt::configure_mpu_() {
 }
 
 void MPU6050Tilt::compute_position_() {
-  if (this->position_sensor_ == nullptr)
-    return;
-
-  if (this->open_angle_ == this->closed_angle_)
+  if (this->position_sensor_ == nullptr || this->open_angle_ == this->closed_angle_)
     return;
 
   float angle = (this->axis_index_ == 0) ? this->angle_x_ : this->angle_y_;
-
   float position = (angle - this->closed_angle_) /
                    (this->open_angle_ - this->closed_angle_) * 100.0f;
 
-  if (position < 0.0f)
-    position = 0.0f;
-  if (position > 100.0f)
-    position = 100.0f;
+  if (position < 0.0f) position = 0.0f;
+  if (position > 100.0f) position = 100.0f;
 
-  this->position_sensor_->publish_state(position);
+  this->position_sensor_->publish_state(roundf(position));
 }
 
 }  // namespace mpu6050_tilt
