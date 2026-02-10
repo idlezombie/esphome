@@ -18,9 +18,12 @@ static const uint8_t MPU6050_REG_ACCEL_CONFIG = 0x1C;
 static const uint8_t MPU6050_REG_ACCEL_XOUT_H = 0x3B;
 static const uint8_t MPU6050_REG_GYRO_XOUT_H = 0x43;
 
-// Reduce sensitivity: only publish when value changes by at least this much
-static const float ANGLE_REPORT_THRESHOLD = 1.0f;   // degrees
-static const float POSITION_REPORT_THRESHOLD = 1.0f; // percent
+// Only publish when value changes by at least this much
+static const float ANGLE_REPORT_THRESHOLD = 1.5f;    // degrees
+static const float POSITION_REPORT_THRESHOLD = 3.0f; // percent
+
+// Gyro Z below this (dps) is treated as zero so angle Z doesn't drift when still
+static const float GYRO_Z_DEADZONE = 0.5f;
 
 MPU6050Tilt::MPU6050Tilt() {
   this->setup_complete_ = false;
@@ -125,21 +128,31 @@ void MPU6050Tilt::update() {
   if (this->raw_gyro_z_sensor_ != nullptr)
     this->raw_gyro_z_sensor_->publish_state(gz);
 
-  // Accelerometer tilt angles (angle_x uses Y,Z; angle_y uses X,Y,Z)
-  float accel_angle_x = atan2(ay, az) * 180.0f / M_PI;
+  // Accel tilt angles per chip axis (choose axis in config to match your mounting)
+  float accel_angle_x = atan2(ay, az) * 180.0f / M_PI;   // tilt in Y,Z plane
   float accel_angle_y = atan2(-ax, sqrt(ay * ay + az * az)) * 180.0f / M_PI;
+  float accel_angle_z = atan2(ax, az) * 180.0f / M_PI;   // tilt in X,Z plane
 
   const float alpha = 0.98f;
   const float dt = this->update_interval_ / 1000.0f;
 
-  // Single complementary filter per angle (no extra smoothing, no locking)
+  // Per-axis angles (for optional angle_x / angle_y / angle_z sensors)
   angle_x_ = alpha * (angle_x_ + gx * dt) + (1 - alpha) * accel_angle_x;
   angle_y_ = alpha * (angle_y_ + gy * dt) + (1 - alpha) * accel_angle_y;
-  angle_z_ = angle_z_ + gz * dt;
+  if (this->axis_index_ == 2) {
+    angle_z_ = alpha * (angle_z_ + gz * dt) + (1 - alpha) * accel_angle_z;
+  } else {
+    float gz_eff = (fabsf(gz) < GYRO_Z_DEADZONE) ? 0.0f : gz;
+    angle_z_ = angle_z_ + gz_eff * dt;
+  }
 
-  // Reduce sensitivity: round to 1 decimal for angle, then only publish if change >= threshold
-  float angle_used = (this->axis_index_ == 0) ? angle_x_ : angle_y_;
-  float angle_rounded = roundf(angle_used * 10.0f) / 10.0f;
+  // Tilt for position: use accel from selected axis + gyro from selected axis (can differ, e.g. accel Z + gyro Y)
+  float accel_tilt = (this->axis_index_ == 0) ? accel_angle_x : ((this->axis_index_ == 1) ? accel_angle_y : accel_angle_z);
+  float gyro_rate = (this->gyro_axis_index_ == 0) ? gx : ((this->gyro_axis_index_ == 1) ? gy : gz);
+  tilt_angle_ = alpha * (tilt_angle_ + gyro_rate * dt) + (1 - alpha) * accel_tilt;
+
+  angle_smoothed_ = 0.92f * angle_smoothed_ + 0.08f * tilt_angle_;
+  float angle_rounded = roundf(angle_smoothed_ * 10.0f) / 10.0f;
 
   const float unset = 9999.0f;
 
@@ -160,7 +173,7 @@ void MPU6050Tilt::update() {
   }
 
   if (this->angle_z_sensor_ != nullptr) {
-    float val = roundf(angle_z_ * 10.0f) / 10.0f;
+    float val = (this->axis_index_ == 2) ? angle_rounded : (roundf(angle_z_ * 10.0f) / 10.0f);
     if (last_published_z_ == unset || fabsf(val - last_published_z_) >= ANGLE_REPORT_THRESHOLD) {
       this->angle_z_sensor_->publish_state(val);
       last_published_z_ = val;
@@ -227,7 +240,8 @@ void MPU6050Tilt::compute_position_() {
   if (this->position_sensor_ == nullptr || this->open_angle_ == this->closed_angle_)
     return;
 
-  float angle = (this->axis_index_ == 0) ? this->angle_x_ : this->angle_y_;
+  float angle = (this->axis_index_ == 0) ? this->angle_x_ :
+                (this->axis_index_ == 1) ? this->angle_y_ : this->angle_z_;
   float position = (angle - this->closed_angle_) /
                    (this->open_angle_ - this->closed_angle_) * 100.0f;
 

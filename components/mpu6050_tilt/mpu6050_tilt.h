@@ -32,6 +32,7 @@ class MPU6050Tilt : public PollingComponent, public i2c::I2CDevice {
   void set_raw_gyro_z_sensor(sensor::Sensor *s) { raw_gyro_z_sensor_ = s; }
 
   void set_axis_index(uint8_t axis) { axis_index_ = axis; }
+  void set_gyro_axis_index(uint8_t axis) { gyro_axis_index_ = axis; }
   void set_accel_fs_sel(uint8_t fs) { accel_fs_sel_ = fs; }
   void set_gyro_fs_sel(uint8_t fs) { gyro_fs_sel_ = fs; }
   void set_dlpf_cfg(uint8_t cfg) { dlpf_cfg_ = cfg; }
@@ -52,13 +53,16 @@ class MPU6050Tilt : public PollingComponent, public i2c::I2CDevice {
   float angle_x_{0.0f};
   float angle_y_{0.0f};
   float angle_z_{0.0f};
+  float tilt_angle_{0.0f};      // accel[axis] + gyro[gyro_axis] for position
+  float angle_smoothed_{0.0f};
 
   float last_published_x_{9999.0f};
   float last_published_y_{9999.0f};
   float last_published_z_{9999.0f};
   float last_published_position_{9999.0f};
 
-  uint8_t axis_index_{0};
+  uint8_t axis_index_{0};       // which accel angle formula (x/y/z)
+  uint8_t gyro_axis_index_{1};  // which gyro axis (0=x, 1=y, 2=z), default y
   uint8_t accel_fs_sel_{1};
   uint8_t gyro_fs_sel_{1};
   uint8_t dlpf_cfg_{4};

@@ -25,7 +25,8 @@ CONF_RAW_GYRO_Y = "raw_gyro_y"
 CONF_RAW_GYRO_Z = "raw_gyro_z"
 
 # Configuration options
-CONF_AXIS = "axis"  # x = angle from accel Y,Z; y = angle from accel X,Y,Z
+CONF_AXIS = "axis"  # which accel tilt angle (x/y/z) — pick the axis that shows full range
+CONF_GYRO_AXIS = "gyro_axis"  # which gyro axis shows rotation during motion (x/y/z)
 CONF_ACCEL_RANGE = "accel_range"
 CONF_GYRO_RANGE = "gyro_range"
 CONF_DLPF = "dlpf"
@@ -63,8 +64,7 @@ RAW_GYRO_SENSOR_SCHEMA = sensor.sensor_schema(
 
 
 def _axis_to_index(axis: str) -> int:
-    # 0 -> X (angle from ay,az), 1 -> Y (angle from ax,ay,az)
-    return 0 if axis.lower() == "x" else 1
+    return {"x": 0, "y": 1, "z": 2}[axis.lower()]
 
 
 def _accel_range_to_fs_sel(val: str) -> int:
@@ -112,7 +112,10 @@ CONFIG_SCHEMA = (
             cv.Optional(CONF_ANGLE_Y): ANGLE_SENSOR_SCHEMA,
             cv.Optional(CONF_ANGLE_Z): ANGLE_SENSOR_SCHEMA,
             cv.Optional(CONF_POSITION): POSITION_SENSOR_SCHEMA,
-            cv.Optional(CONF_AXIS, default="x"): cv.one_of("x", "y", lower=True),
+            cv.Optional(CONF_AXIS, default="z"): cv.one_of("x", "y", "z", lower=True),
+            cv.Optional(CONF_GYRO_AXIS, default="y"): cv.one_of(
+                "x", "y", "z", lower=True
+            ),
             cv.Optional(CONF_ACCEL_RANGE, default="4g"): cv.one_of(
                 "2g", "4g", "8g", "16g", lower=True
             ),
@@ -186,8 +189,10 @@ async def to_code(config):
 
     axis_idx = _axis_to_index(config[CONF_AXIS])
     cg.add(var.set_axis_index(axis_idx))
+    gyro_axis_idx = _axis_to_index(config[CONF_GYRO_AXIS])
+    cg.add(var.set_gyro_axis_index(gyro_axis_idx))
 
-    # Hardware configuration (4g = less sensitive than 2g; good for stable readings)
+    # Hardware configuration
     accel_fs = _accel_range_to_fs_sel(config[CONF_ACCEL_RANGE])
     gyro_fs = _gyro_range_to_fs_sel(config[CONF_GYRO_RANGE])
     dlpf_cfg = _dlpf_to_cfg(config[CONF_DLPF])
