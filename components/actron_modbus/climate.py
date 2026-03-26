@@ -30,7 +30,6 @@ CONFIG_SCHEMA = (
             cv.GenerateID(CONF_MODBUS_CONTROLLER_ID): cv.use_id(
                 modbus_controller.ModbusController
             ),
-            cv.Optional(CONF_NAME, default="Actron Climate"): cv.string_strict,
             cv.Optional(CONF_POWER_REGISTER, default=1): cv.positive_int,
             cv.Optional(CONF_FAN_REGISTER, default=4): cv.positive_int,
             cv.Optional(CONF_MODE_REGISTER, default=101): cv.positive_int,
