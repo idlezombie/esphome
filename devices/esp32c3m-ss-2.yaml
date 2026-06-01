@@ -1,0 +1,391 @@
+esphome:
+  name: esp32c3m-ss-2
+  friendly_name: "AC BMS Controller"
+
+esp32:
+  variant: ESP32C3
+  framework:
+    type: esp-idf
+
+logger:
+
+<<: !include common.yaml
+
+external_components:
+  - source: github://idlezombie/esphome@actron_modbus
+    components: [actron_modbus]
+    refresh: 0s
+
+# ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓ #
+# ┃ esp32 Modbus Interface Config ┃ #
+# ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛ #
+
+uart:
+  id: uart_1
+  rx_pin: GPIO20
+  tx_pin: GPIO21
+  baud_rate: 9600
+  parity: NONE
+  stop_bits: 1
+
+modbus:
+  id: modbus_1
+  uart_id: uart_1
+  send_wait_time: 100ms
+
+modbus_controller:
+  - id: actron_ac
+    address: 1
+    modbus_id: modbus_1
+    update_interval: 1s
+
+climate:
+  - platform: actron_modbus
+    name: "Actron Climate"
+    modbus_controller_id: actron_ac
+    power_register: 1
+    fan_register: 4
+    mode_register: 101
+    setpoint_register: 102
+    room_temp_register: 851
+    command_interval: 200ms
+    optimistic: true
+    update_interval: 1s
+
+# ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓ #
+# ┃ Actron ICAMID-MOD Modbus Register Map ┃ #
+# ┃  Classic Series - Usable Values Only  ┃ #
+# ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛ #
+
+# Control
+
+#------------------------------------------
+number:
+  # Control Registers
+  - platform: modbus_controller
+    modbus_controller_id: actron_ac
+    name: "Raw Power Register"
+    entity_category: diagnostic
+    id: ac_raw_power
+    register_type: holding
+    address: 1
+    value_type: U_WORD
+    min_value: 0
+    max_value: 1
+    step: 1
+    #region agent log
+    on_value:
+      - lambda: |-
+          ESP_LOGI("agent_dbg", "H1 raw_power poll value=%.0f ms=%lu", x, millis());
+    #endregion
+
+  - platform: modbus_controller
+    modbus_controller_id: actron_ac
+    name: "Raw Fan Speed Register"
+    entity_category: diagnostic
+    id: ac_raw_fan_speed
+    register_type: holding
+    address: 4
+    value_type: U_WORD
+    min_value: 1
+    max_value: 3
+    step: 1
+
+  - platform: modbus_controller
+    modbus_controller_id: actron_ac
+    name: "Raw Mode Register"
+    entity_category: diagnostic
+    id: ac_raw_mode
+    register_type: holding
+    address: 101
+    value_type: U_WORD
+    min_value: 1
+    max_value: 4
+    step: 1
+
+  - platform: modbus_controller
+    modbus_controller_id: actron_ac
+    name: "Raw Setpoint Register"
+    entity_category: diagnostic
+    id: ac_raw_setpoint
+    register_type: holding
+    address: 102
+    value_type: U_WORD
+    min_value: 160
+    max_value: 300
+    step: 5
+    #region agent log
+    on_value:
+      - lambda: |-
+          ESP_LOGI("agent_dbg", "H1 raw_setpoint poll value=%.0f ms=%lu", x, millis());
+    #endregion
+
+  - platform: modbus_controller
+    modbus_controller_id: actron_ac
+    name: "Raw Continuous Fan Register"
+    entity_category: diagnostic
+    id: ac_raw_fan_cont
+    register_type: holding
+    address: 105
+    value_type: U_WORD
+    min_value: 0
+    max_value: 1
+    step: 1
+    #region agent log
+    on_value:
+      - lambda: |-
+          ESP_LOGI("agent_dbg", "H1 raw_fan_cont poll value=%.0f ms=%lu", x, millis());
+    #endregion
+
+  # Control Template Wrappers
+  - platform: template
+    id: ac_setpoint
+    name: "Temperature"
+    unit_of_measurement: "°C"
+    min_value: 16.0
+    max_value: 30.0
+    step: 0.5
+    lambda: |-
+      return id(ac_raw_setpoint).state * 0.1;
+    set_action:
+      #region agent log
+      - lambda: |-
+          ESP_LOGI("agent_dbg", "H3 ac_setpoint set_action requested=%.1f ms=%lu", x, millis());
+      #endregion
+      - lambda: |-
+          int raw = (int)(x * 10.0);
+          id(ac_raw_setpoint).publish_state(raw);
+      - number.set:
+          id: ac_raw_setpoint
+          value: !lambda 'return (int)(x * 10.0);'
+
+#------------------------------------------
+switch:
+  # Zone Control Registers
+  - platform: modbus_controller
+    modbus_controller_id: actron_ac
+    name: "Zone: Upstairs"
+    id: ac_raw_zone_upstairs
+    entity_category: diagnostic
+    register_type: holding
+    address: 5001
+    bitmask: 0x0001
+    #region agent log
+    on_state:
+      - lambda: |-
+          ESP_LOGI("agent_dbg", "H4 zone_upstairs state=%d ms=%lu", x ? 1 : 0, millis());
+    #endregion
+
+  - platform: modbus_controller
+    modbus_controller_id: actron_ac
+    name: "Zone: Downstairs"
+    id: ac_raw_zone_downstairs
+    entity_category: diagnostic
+    register_type: holding
+    address: 5002
+    bitmask: 0x0001
+    #region agent log
+    on_state:
+      - lambda: |-
+          ESP_LOGI("agent_dbg", "H4 zone_downstairs state=%d ms=%lu", x ? 1 : 0, millis());
+    #endregion
+
+  # Control Template Wrappers
+  - platform: template
+    name: "Power"
+    id: ac_power
+    lambda: |-
+      return (id(ac_raw_power).state == 1);
+    turn_on_action:
+      - number.set:
+          id: ac_raw_power
+          value: 1
+    turn_off_action:
+      - number.set:
+          id: ac_raw_power
+          value: 0
+
+  - platform: template
+    name: "Continuous Fan"
+    id: ac_fan_cont
+    lambda: |-
+      return (id(ac_raw_fan_cont).state == 1);
+    turn_on_action:
+      - number.set:
+          id: ac_raw_fan_cont
+          value: 1
+    turn_off_action:
+      - number.set:
+          id: ac_raw_fan_cont
+          value: 0
+
+select:
+  - platform: template
+    name: "AC Mode"
+    id: ac_mode
+    options:
+      - "Heat"
+      - "Cool"
+      - "Auto"
+      - "Fan Only"
+    lambda: |-
+      switch ((int)id(ac_raw_mode).state) {
+        case 1: return std::string("Heat");
+        case 2: return std::string("Cool");
+        case 3: return std::string("Auto");
+        case 4: return std::string("Fan Only");
+        default: return std::string("Auto");
+      }
+    set_action:
+      - lambda: |-
+          if (x == "Heat") {
+            id(ac_raw_mode).publish_state(1);
+          } else if (x == "Cool") {
+            id(ac_raw_mode).publish_state(2);
+          } else if (x == "Auto") {
+            id(ac_raw_mode).publish_state(3);
+          } else if (x == "Fan Only") {
+            id(ac_raw_mode).publish_state(4);
+          }
+      - number.set:
+          id: ac_raw_mode
+          value: !lambda |-
+            if (x == "Heat") return 1;
+            if (x == "Cool") return 2;
+            if (x == "Auto") return 3;
+            if (x == "Fan Only") return 4;
+            return 3;
+
+
+  - platform: template
+    name: "Fan Speed"
+    id: ac_fan_speed
+    options:
+      - "Low"
+      - "Medium"
+      - "High"
+    lambda: |-
+      switch ((int)id(ac_raw_fan_speed).state) {
+        case 1: return std::string("Low");
+        case 2: return std::string("Medium");
+        case 3: return std::string("High");
+        default: return std::string("Low");
+      }
+    set_action:
+      - lambda: |-
+          if (x == "Low") {
+            id(ac_raw_fan_speed).publish_state(1);
+          } else if (x == "Medium") {
+            id(ac_raw_fan_speed).publish_state(2);
+          } else if (x == "High") {
+            id(ac_raw_fan_speed).publish_state(3);
+          }
+
+      - number.set:
+          id: ac_raw_fan_speed
+          value: !lambda |-
+            if (x == "Low") return 1;
+            if (x == "Medium") return 2;
+            if (x == "High") return 3;
+            return 1;
+
+#------------------------------------------
+sensor:
+  # Feedback Registers
+  - platform: modbus_controller
+    modbus_controller_id: actron_ac
+    name: "Fan Speed Demand"
+    id: ac_raw_fan_speed_demand
+    entity_category: diagnostic
+    register_type: holding
+    address: 703
+    value_type: U_WORD
+    unit_of_measurement: "%"
+    accuracy_decimals: 1
+    lambda: |-
+      return (x * 0.1);
+    filters:
+      - throttle_average: 10s
+
+  - platform: modbus_controller
+    modbus_controller_id: actron_ac
+    name: "Room Temperature"
+    id: ac_raw_room_temp
+    entity_category: diagnostic
+    unit_of_measurement: "°C"
+    value_type: U_WORD
+    register_type: holding
+    address: 851
+    accuracy_decimals: 1
+    filters:
+      - multiply: 0.1
+
+  - platform: modbus_controller
+    modbus_controller_id: actron_ac
+    name: "Indoor Coil Temperature"
+    id: ac_raw_coil_temp
+    entity_category: diagnostic
+    unit_of_measurement: "°C"
+    accuracy_decimals: 1
+    register_type: holding
+    address: 1301
+    value_type: U_WORD
+    lambda: |-
+      return (x * 0.1);
+    filters:
+      - throttle_average: 10s
+
+  - platform: modbus_controller
+    modbus_controller_id: actron_ac
+    name: "Raw Indoor Comms Register"
+    entity_category: diagnostic
+    id: ac_raw_indoor_comms
+    unit_of_measurement: ""
+    accuracy_decimals: 0
+    register_type: holding
+    address: 906
+    value_type: U_WORD
+
+  - platform: modbus_controller
+    modbus_controller_id: actron_ac
+    name: "Compressor Demand"
+    id: ac_raw_compressor_demand
+    entity_category: diagnostic
+    unit_of_measurement: "%"
+    accuracy_decimals: 1
+    register_type: holding
+    address: 1104
+    value_type: U_WORD
+    lambda: |-
+      return x * 0.1;
+    filters:
+      - throttle_average: 10s
+
+  - platform: modbus_controller
+    modbus_controller_id: actron_ac
+    name: "Compressor EEV Position"
+    id: ac_raw_compressor_eev_position
+    entity_category: diagnostic
+    unit_of_measurement: "%"
+    accuracy_decimals: 1
+    register_type: holding
+    address: 1401
+    value_type: U_WORD
+    lambda: |-
+      return x * 0.1;
+    filters:
+      - throttle_average: 10s
+
+binary_sensor:
+  # Feedback Template Wrappers
+  - platform: template
+    name: "Indoor Unit Comms Status"
+    id: ac_indoor_comms
+    entity_category: diagnostic
+    device_class: problem
+    lambda: |-
+      if (id(ac_raw_indoor_comms).state == 0) {
+        return false;
+      } else {
+        return true;
+      }

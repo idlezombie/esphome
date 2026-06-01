@@ -1,0 +1,500 @@
+esphome:
+  name: esp32c6m-ss-1
+  friendly_name: "Pet Feeder"
+
+esp32:
+  variant: ESP32C6
+  framework:
+    type: esp-idf
+
+logger:
+
+<<: !include common.yaml
+
+#--------------------------
+
+globals:
+  - id: motor_p_output_state
+    type: bool
+    restore_value: false
+    initial_value: 'false'
+  - id: motor_n_output_state
+    type: bool
+    restore_value: false
+    initial_value: 'false'
+  - id: motor_direction_state
+    type: std::string
+    restore_value: false
+    initial_value: '"off"'
+  - id: motor_jammed_state
+    type: bool
+    restore_value: false
+    initial_value: 'false'
+  - id: error_led_blink_state
+    type: bool
+    restore_value: false
+    initial_value: 'false'
+  - id: wifi_led_blink_state
+    type: bool
+    restore_value: false
+    initial_value: 'false'
+  - id: feeder_status_state
+    type: std::string
+    restore_value: false
+    initial_value: '"idle"'
+  - id: soft_fail_pending
+    type: bool
+    restore_value: false
+    initial_value: 'false'
+  - id: feeder_tare_offset
+    type: float
+    restore_value: true
+    initial_value: '0.0'
+
+#--------------------------
+
+sensor:
+  - platform: hx711
+    name: "Raw Weight"
+    id: scale_feeder_weight
+    entity_category: diagnostic
+    dout_pin: GPIO2
+    clk_pin: GPIO21
+    gain: 128
+    update_interval: 1s
+    accuracy_decimals: 0
+    filters:
+      - calibrate_linear:
+          - -657372 -> 0
+          - -658956 -> 5.4
+          - -660472 -> 10.8
+          - -670064 -> 46.5
+      - sliding_window_moving_average:
+          window_size: 8
+          send_every: 1
+      - lambda: |-
+          if (x > -0.2f && x < 0.2f) {
+            return 0.0f;
+          }
+          return roundf(x);
+    unit_of_measurement: "g"
+
+  - platform: pulse_counter
+    pin: GPIO0
+    id: gpio_motor_t
+    internal: true
+    update_interval: 0.2s
+    internal_filter: 10us
+    count_mode:
+      rising_edge: INCREMENT
+      falling_edge: DISABLE
+
+  - platform: template
+    name: "Dispensed Weight"
+    id: scale_feeder_net_weight
+    unit_of_measurement: "g"
+    device_class: weight
+    state_class: measurement
+    accuracy_decimals: 0
+    update_interval: 1s
+    lambda: |-
+      float net = id(scale_feeder_weight).state - id(feeder_tare_offset);
+      if (net > -0.5f && net < 0.5f) {
+        net = 0.0f;
+      }
+      return roundf(net);
+
+text_sensor:
+  - platform: template
+    name: "Status"
+    id: feeder_status
+    update_interval: 200ms
+    lambda: |-
+      const std::string status = id(feeder_status_state);
+      if (status == "idle") return {"Idle"};
+      if (status == "dispensing") return {"Dispensing"};
+      if (status == "back_off") return {"Back Off"};
+      if (status == "success") return {"Success"};
+      if (status == "jammed") return {"Jammed"};
+      if (status == "hopper_empty") return {"Hopper Empty"};
+      return status;
+  - platform: template
+    name: "Motor State"
+    id: motor_state
+    entity_category: diagnostic
+    update_interval: 200ms
+    lambda: |-
+      const bool p_on = id(motor_p_output_state);
+      const bool n_on = id(motor_n_output_state);
+      if (p_on && !n_on) return {"forward"};
+      if (!p_on && n_on) return {"reverse"};
+      if (!p_on && !n_on) return {"off"};
+      return {"fault"};
+
+binary_sensor:
+  - platform: gpio
+    pin:
+      number: GPIO19
+      mode: INPUT_PULLUP
+      inverted: true
+    id: gpio_hop_rx
+    name: "Hopper"
+    entity_category: diagnostic
+    device_class: problem
+
+  - platform: gpio
+    pin:
+      number: GPIO17
+      mode: INPUT_PULLUP
+      inverted: true
+    id: gpio_feed_btn
+    name: "Manual Dispense"
+    entity_category: diagnostic
+    filters:
+      - delayed_on: 20ms
+      - delayed_off: 20ms
+    on_click:
+      - min_length: 20ms
+        max_length: 800ms
+        then:
+          - script.execute: motor_dispense_once
+      - min_length: 800ms
+        max_length: 5s
+        then:
+          - script.execute: force_dispense_once
+
+  - platform: template
+    id: motor_tacho_detected
+    name: "Motor Pulse"
+    entity_category: diagnostic
+    lambda: |-
+      return id(gpio_motor_t).state > 0;
+    filters:
+      - delayed_off: 500ms
+
+output:
+  - platform: gpio
+    pin: GPIO22
+    id: gpio_status_led_pwr
+
+  - platform: gpio
+    pin: GPIO23
+    id: gpio_status_led_err
+    inverted: true
+
+  - platform: gpio
+    pin: GPIO16
+    id: gpio_status_led_wifi
+    inverted: true
+
+  - platform: gpio
+    pin: GPIO20
+    id: gpio_motor_n
+
+  - platform: gpio
+    pin: GPIO18
+    id: gpio_motor_p
+
+switch:
+  - platform: output
+    output: gpio_status_led_pwr
+    id: status_leds_power
+    name: "Status LEDs"
+    restore_mode: RESTORE_DEFAULT_OFF
+    entity_category: config
+
+light:
+  - platform: status_led
+    name: "Diagnostics LED"
+    id: diagnostics_led
+    entity_category: diagnostic
+    pin:
+      number: GPIO15
+      ignore_strapping_warning: true
+      inverted: true
+
+interval:
+  - interval: 500ms
+    then:
+      - if:
+          condition:
+            lambda: 'return id(motor_jammed_state) && id(feeder_status_state) != "dispensing" && id(feeder_status_state) != "success";'
+          then:
+            - lambda: 'id(feeder_status_state) = "jammed";'
+          else:
+            - if:
+                condition:
+                  lambda: 'return id(gpio_hop_rx).state && id(feeder_status_state) != "dispensing" && id(feeder_status_state) != "success";'
+                then:
+                  - lambda: 'id(feeder_status_state) = "hopper_empty";'
+                else:
+                  - if:
+                      condition:
+                        lambda: 'return !id(gpio_hop_rx).state && id(feeder_status_state) == "hopper_empty";'
+                      then:
+                        - lambda: 'id(feeder_status_state) = "idle";'
+      - if:
+          condition:
+            lambda: 'return id(feeder_status_state) == "jammed";'
+          then:
+            - output.turn_on: gpio_status_led_err
+          else:
+            - if:
+                condition:
+                  lambda: 'return id(feeder_status_state) == "hopper_empty";'
+                then:
+                  - lambda: 'id(error_led_blink_state) = !id(error_led_blink_state);'
+                  - if:
+                      condition:
+                        lambda: 'return id(error_led_blink_state);'
+                      then:
+                        - output.turn_on: gpio_status_led_err
+                      else:
+                        - output.turn_off: gpio_status_led_err
+                else:
+                  - lambda: 'id(error_led_blink_state) = false;'
+                  - output.turn_off: gpio_status_led_err
+      - if:
+          condition:
+            wifi.connected:
+          then:
+            - output.turn_on: gpio_status_led_wifi
+          else:
+            - lambda: 'id(wifi_led_blink_state) = !id(wifi_led_blink_state);'
+            - if:
+                condition:
+                  lambda: 'return id(wifi_led_blink_state);'
+                then:
+                  - output.turn_on: gpio_status_led_wifi
+                else:
+                  - output.turn_off: gpio_status_led_wifi
+
+select:
+  - platform: template
+    name: "Motor direction"
+    id: motor_direction
+    entity_category: diagnostic
+    options:
+      - "off"
+      - "forward"
+      - "reverse"
+    lambda: 'return id(motor_direction_state);'
+    set_action:
+      - output.turn_off: gpio_motor_p
+      - lambda: |-
+          id(motor_p_output_state) = false;
+      - delay: 10ms
+      - output.turn_off: gpio_motor_n
+      - lambda: |-
+          id(motor_n_output_state) = false;
+      - delay: 10ms
+      - if:
+          condition:
+            lambda: 'return x == "forward";'
+          then:
+            - output.turn_on: gpio_motor_p
+            - lambda: |-
+                id(motor_p_output_state) = true;
+      - if:
+          condition:
+            lambda: 'return x == "reverse";'
+          then:
+            - output.turn_on: gpio_motor_n
+            - lambda: |-
+                id(motor_n_output_state) = true;
+      - lambda: id(motor_direction_state) = x;
+    update_interval: 1s
+
+button:
+  - platform: template
+    name: "Dispense"
+    id: dispense_button
+    on_press:
+      - script.execute: motor_dispense_once
+  - platform: template
+    name: "Force Dispense"
+    id: force_dispense_button
+    on_press:
+      - script.execute: force_dispense_once
+  - platform: template
+    name: "Tare"
+    id: tare_bowl_button
+    entity_category: config
+    on_press:
+      - lambda: |-
+          id(feeder_tare_offset) = id(scale_feeder_weight).state;
+      - logger.log: "Bowl tare offset updated"
+
+script:
+  - id: motor_set_direction_primary
+    mode: restart
+    parameters:
+      direction: string
+    then:
+      - output.turn_off: gpio_motor_p
+      - lambda: |-
+          id(motor_p_output_state) = false;
+      - delay: 10ms
+      - output.turn_off: gpio_motor_n
+      - lambda: |-
+          id(motor_n_output_state) = false;
+      - delay: 10ms
+      - if:
+          condition:
+            lambda: 'return direction == "forward";'
+          then:
+            - output.turn_on: gpio_motor_p
+            - lambda: |-
+                id(motor_p_output_state) = true;
+      - if:
+          condition:
+            lambda: 'return direction == "reverse";'
+          then:
+            - output.turn_on: gpio_motor_n
+            - lambda: |-
+                id(motor_n_output_state) = true;
+      - lambda: id(motor_direction_state) = direction;
+
+  - id: motor_dispense_once
+    mode: single
+    then:
+      - script.execute:
+          id: motor_dispense_core
+          ignore_hopper_check: false
+          ignore_jam_check: false
+
+  - id: force_dispense_once
+    mode: single
+    then:
+      - script.execute:
+          id: motor_dispense_core
+          ignore_hopper_check: true
+          ignore_jam_check: true
+
+  - id: motor_dispense_core
+    mode: single
+    parameters:
+      ignore_hopper_check: bool
+      ignore_jam_check: bool
+    then:
+      - if:
+          condition:
+            lambda: 'return !ignore_jam_check && id(motor_jammed_state);'
+          then:
+            - lambda: |-
+                id(feeder_status_state) = "jammed";
+            - logger.log: "Dispense blocked: feeder is jammed"
+          else:
+            - if:
+                condition:
+                  lambda: 'return !ignore_hopper_check && id(gpio_hop_rx).state;'
+                then:
+                  - lambda: |-
+                      id(feeder_status_state) = "hopper_empty";
+                      id(soft_fail_pending) = false;
+                  - logger.log: "Dispense blocked: hopper empty"
+                  - script.execute:
+                      id: motor_set_direction_primary
+                      direction: "off"
+                else:
+                  - lambda: |-
+                      id(feeder_status_state) = "dispensing";
+                  - logger.log: "Dispense start: forward attempt"
+                  # Ensure we are waiting for a fresh tacho event, not a lingering pulse.
+                  - wait_until:
+                      condition:
+                        binary_sensor.is_off: motor_tacho_detected
+                      timeout: 1s
+                  - script.execute:
+                      id: motor_set_direction_primary
+                      direction: "off"
+                  - script.execute:
+                      id: motor_set_direction_primary
+                      direction: "forward"
+                  - if:
+                      condition:
+                        binary_sensor.is_on: gpio_hop_rx
+                      then:
+                        - logger.log: "Hopper empty detected during dispense attempt"
+                  - wait_until:
+                      condition:
+                        binary_sensor.is_on: motor_tacho_detected
+                      timeout: 2.3s
+                  - if:
+                      condition:
+                        binary_sensor.is_on: motor_tacho_detected
+                      then:
+                        - lambda: |-
+                            id(feeder_status_state) = "success";
+                            id(motor_jammed_state) = false;
+                            id(soft_fail_pending) = false;
+                        - logger.log: "Dispense success"
+                        - script.execute:
+                            id: motor_set_direction_primary
+                            direction: "off"
+                        - delay: 2s
+                        - lambda: id(feeder_status_state) = "idle";
+                      else:
+                        - lambda: id(feeder_status_state) = "back_off";
+                        - logger.log: "No tacho pulse, running backoff reverse"
+                        - script.execute:
+                            id: motor_set_direction_primary
+                            direction: "off"
+                        - script.execute:
+                            id: motor_set_direction_primary
+                            direction: "reverse"
+                        - delay: 500ms
+                        - script.execute:
+                            id: motor_set_direction_primary
+                            direction: "off"
+                        - delay: 100ms
+                        - if:
+                            condition:
+                              lambda: 'return !ignore_hopper_check && id(gpio_hop_rx).state;'
+                            then:
+                              - lambda: |-
+                                  id(feeder_status_state) = "hopper_empty";
+                                  id(soft_fail_pending) = false;
+                              - logger.log: "Retry blocked: hopper empty"
+                            else:
+                              - wait_until:
+                                  condition:
+                                    binary_sensor.is_off: motor_tacho_detected
+                                  timeout: 1s
+                              - script.execute:
+                                  id: motor_set_direction_primary
+                                  direction: "forward"
+                              - logger.log: "Dispense retry: second forward attempt"
+                              - wait_until:
+                                  condition:
+                                    binary_sensor.is_on: motor_tacho_detected
+                                  timeout: 2.3s
+                              - if:
+                                  condition:
+                                    binary_sensor.is_on: motor_tacho_detected
+                                  then:
+                                    - lambda: |-
+                                        id(feeder_status_state) = "success";
+                                        id(motor_jammed_state) = false;
+                                        id(soft_fail_pending) = false;
+                                    - logger.log: "Dispense success on retry"
+                                    - script.execute:
+                                        id: motor_set_direction_primary
+                                        direction: "off"
+                                    - delay: 2s
+                                    - lambda: id(feeder_status_state) = "idle";
+                                  else:
+                                    - script.execute:
+                                        id: motor_set_direction_primary
+                                        direction: "off"
+                                    - if:
+                                        condition:
+                                          lambda: 'return id(soft_fail_pending);'
+                                        then:
+                                          - lambda: |-
+                                              id(motor_jammed_state) = true;
+                                              id(feeder_status_state) = "jammed";
+                                          - logger.log: "Second consecutive soft fail, motor marked jammed"
+                                        else:
+                                          - lambda: id(soft_fail_pending) = true;
+                                          - logger.log: "Soft fail recorded, waiting for next dispense attempt"

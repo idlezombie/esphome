@@ -1,0 +1,74 @@
+substitutions:
+  device_name: esp32c6m-ws-1
+  display_name: "Unassigned"
+  moodel: ESP32C6
+  idf: esp-idf
+
+#esphome:
+#  area: "Patio"
+#esp32:
+# board: esp32-c6-devkitc-1
+
+<<: !include common.yaml
+
+#---
+
+#external_components:
+#  - source: github://idlezombie/esphome@jitter
+#    components: [mpu6050_tilt]
+#    refresh: 0s
+
+#---
+#i2c:
+#  sda: GPIO18
+#  scl: GPIO15
+#  scan: true
+
+#light:
+#  - platform: esp32_rmt_led_strip
+#    id: esp32_led
+#    name: "Light"
+#    entity_category: config
+#    pin: GPIO8
+#    chipset: ws2812
+#    rgb_order: RGB
+#    num_leds: 1
+#    restore_mode: RESTORE_DEFAULT_OFF
+
+#sensor:
+#  - platform: mpu6050_tilt
+#    id: roof_louvre_mpu
+#    update_interval: 250ms
+#    accel_range: 4g
+#    gyro_range: 500dps
+#    dlpf: 20
+#    axis: x
+#    gyro_axis: y
+#    #closed_angle: 0.0
+#    #open_angle: 120.0
+#    #tilt_gyro_axis: y
+#    #smoothing_factor: 0.9
+#    #stationary_threshold: 0.1
+#    #deadband_threshold: 0.8
+#    #position_deadband_threshold: 3.0
+#    angle_x:
+#      name: "Roof Louvre Angle X"
+#    angle_y:
+#      name: "Roof Louvre Angle Y"
+#    angle_z:
+#      name: "Roof Louvre Angle Z"
+#    position:
+#      name: "Roof Louvre Position"
+#      id: roof_louvre_position
+#    raw_accel_x:
+#      name: "Louvre Raw Accel X"
+#    raw_accel_y:
+#      name: "Louvre Raw Accel Y"
+#    raw_accel_z:
+#      name: "Louvre Raw Accel Z"
+#    raw_gyro_x:
+#      name: "Louvre Raw Gyro X"
+#    raw_gyro_y:
+#      name: "Louvre Raw Gyro Y"
+#    raw_gyro_z:
+#      name: "Louvre Raw Gyro Z"
