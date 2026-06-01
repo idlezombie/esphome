@@ -16,9 +16,17 @@ CONF_ANGLE_X = "angle_x"
 CONF_ANGLE_Y = "angle_y"
 CONF_ANGLE_Z = "angle_z"
 CONF_POSITION = "position"
+# Diagnostic: raw (calibrated) accel and gyro
+CONF_RAW_ACCEL_X = "raw_accel_x"
+CONF_RAW_ACCEL_Y = "raw_accel_y"
+CONF_RAW_ACCEL_Z = "raw_accel_z"
+CONF_RAW_GYRO_X = "raw_gyro_x"
+CONF_RAW_GYRO_Y = "raw_gyro_y"
+CONF_RAW_GYRO_Z = "raw_gyro_z"
 
 # Configuration options
-CONF_AXIS = "axis"
+CONF_AXIS = "axis"  # which accel tilt angle (x/y/z) — pick the axis that shows full range
+CONF_GYRO_AXIS = "gyro_axis"  # which gyro axis shows rotation during motion (x/y/z)
 CONF_ACCEL_RANGE = "accel_range"
 CONF_GYRO_RANGE = "gyro_range"
 CONF_DLPF = "dlpf"
@@ -40,10 +48,23 @@ POSITION_SENSOR_SCHEMA = sensor.sensor_schema(
     accuracy_decimals=0,
 )
 
+# Diagnostic sensors: calibrated accel in g, gyro in °/s (show in device diagnostics only)
+RAW_ACCEL_SENSOR_SCHEMA = sensor.sensor_schema(
+    unit_of_measurement="g",
+    icon=ICON_EMPTY,
+    accuracy_decimals=3,
+    entity_category="diagnostic",
+)
+RAW_GYRO_SENSOR_SCHEMA = sensor.sensor_schema(
+    unit_of_measurement="°/s",
+    icon=ICON_EMPTY,
+    accuracy_decimals=2,
+    entity_category="diagnostic",
+)
+
 
 def _axis_to_index(axis: str) -> int:
-    # 0 -> X, 1 -> Y
-    return 0 if axis.lower() == "x" else 1
+    return {"x": 0, "y": 1, "z": 2}[axis.lower()]
 
 
 def _accel_range_to_fs_sel(val: str) -> int:
@@ -91,7 +112,10 @@ CONFIG_SCHEMA = (
             cv.Optional(CONF_ANGLE_Y): ANGLE_SENSOR_SCHEMA,
             cv.Optional(CONF_ANGLE_Z): ANGLE_SENSOR_SCHEMA,
             cv.Optional(CONF_POSITION): POSITION_SENSOR_SCHEMA,
-            cv.Optional(CONF_AXIS, default="x"): cv.one_of("x", "y", lower=True),
+            cv.Optional(CONF_AXIS, default="z"): cv.one_of("x", "y", "z", lower=True),
+            cv.Optional(CONF_GYRO_AXIS, default="y"): cv.one_of(
+                "x", "y", "z", lower=True
+            ),
             cv.Optional(CONF_ACCEL_RANGE, default="4g"): cv.one_of(
                 "2g", "4g", "8g", "16g", lower=True
             ),
@@ -103,6 +127,13 @@ CONFIG_SCHEMA = (
             ),
             cv.Optional(CONF_CLOSED_ANGLE, default=0.0): cv.float_,
             cv.Optional(CONF_OPEN_ANGLE, default=90.0): cv.float_,
+            # Optional diagnostic sensors (raw calibrated accel/gyro)
+            cv.Optional(CONF_RAW_ACCEL_X): RAW_ACCEL_SENSOR_SCHEMA,
+            cv.Optional(CONF_RAW_ACCEL_Y): RAW_ACCEL_SENSOR_SCHEMA,
+            cv.Optional(CONF_RAW_ACCEL_Z): RAW_ACCEL_SENSOR_SCHEMA,
+            cv.Optional(CONF_RAW_GYRO_X): RAW_GYRO_SENSOR_SCHEMA,
+            cv.Optional(CONF_RAW_GYRO_Y): RAW_GYRO_SENSOR_SCHEMA,
+            cv.Optional(CONF_RAW_GYRO_Z): RAW_GYRO_SENSOR_SCHEMA,
         }
     )
     .extend(cv.polling_component_schema("50ms"))
@@ -136,9 +167,30 @@ async def to_code(config):
         sens = await sensor.new_sensor(config[CONF_POSITION])
         cg.add(var.set_position_sensor(sens))
 
-    # Axis selection for louvre position
+    # Diagnostic: raw accel and gyro
+    if CONF_RAW_ACCEL_X in config:
+        sens = await sensor.new_sensor(config[CONF_RAW_ACCEL_X])
+        cg.add(var.set_raw_accel_x_sensor(sens))
+    if CONF_RAW_ACCEL_Y in config:
+        sens = await sensor.new_sensor(config[CONF_RAW_ACCEL_Y])
+        cg.add(var.set_raw_accel_y_sensor(sens))
+    if CONF_RAW_ACCEL_Z in config:
+        sens = await sensor.new_sensor(config[CONF_RAW_ACCEL_Z])
+        cg.add(var.set_raw_accel_z_sensor(sens))
+    if CONF_RAW_GYRO_X in config:
+        sens = await sensor.new_sensor(config[CONF_RAW_GYRO_X])
+        cg.add(var.set_raw_gyro_x_sensor(sens))
+    if CONF_RAW_GYRO_Y in config:
+        sens = await sensor.new_sensor(config[CONF_RAW_GYRO_Y])
+        cg.add(var.set_raw_gyro_y_sensor(sens))
+    if CONF_RAW_GYRO_Z in config:
+        sens = await sensor.new_sensor(config[CONF_RAW_GYRO_Z])
+        cg.add(var.set_raw_gyro_z_sensor(sens))
+
     axis_idx = _axis_to_index(config[CONF_AXIS])
     cg.add(var.set_axis_index(axis_idx))
+    gyro_axis_idx = _axis_to_index(config[CONF_GYRO_AXIS])
+    cg.add(var.set_gyro_axis_index(gyro_axis_idx))
 
     # Hardware configuration
     accel_fs = _accel_range_to_fs_sel(config[CONF_ACCEL_RANGE])
@@ -149,6 +201,5 @@ async def to_code(config):
     cg.add(var.set_gyro_fs_sel(gyro_fs))
     cg.add(var.set_dlpf_cfg(dlpf_cfg))
 
-    # Position mapping configuration
     cg.add(var.set_closed_angle(config[CONF_CLOSED_ANGLE]))
     cg.add(var.set_open_angle(config[CONF_OPEN_ANGLE]))
