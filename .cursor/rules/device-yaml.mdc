@@ -1,5 +1,5 @@
 ---
-description: Device YAML reference copies (devices/*.yaml)
+description: Device YAML conventions and behavioural contracts
 globs: devices/**
 alwaysApply: false
 ---
@@ -11,6 +11,27 @@ Files under `devices/` are **not** built from this repo. The real configs live i
 - Treat `<<: !include common.yaml` as a placeholder. Assume it provides `wifi`, `api`, `ota`, captive portal, time, etc.
 - Do not invent or commit `common.yaml` / `secrets.yaml` content here.
 - Do not run `esphome config` / `esphome compile` against these files — it will fail on the missing include.
+
+# Layout
+
+Devices that have companion documentation live in their own folder:
+
+```
+devices/feeder/
+  esp32c6m-ss-1.yaml
+  behaviour.md
+```
+
+Devices that are still single-file may sit directly under `devices/`. Move them into a folder once they grow companion files (behaviour notes, pinout photos, datasheets, lovelace cards, etc.).
+
+# Behaviour contracts
+
+When a device folder contains `behaviour.md`:
+
+- Read it before modifying the device YAML.
+- After changes, verify every `REQ-*` invariant still holds.
+- If a `REQ-*` is intentionally changed, removed, or added, update `behaviour.md` in the same commit and mention the affected IDs in the commit message (e.g. `feeder: relax REQ-D6 to 3s`).
+- Prefer adding new REQs over silently extending existing behaviour.
 
 # Custom component references
 
