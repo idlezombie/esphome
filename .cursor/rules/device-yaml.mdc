@@ -1,0 +1,31 @@
+---
+description: Device YAML reference copies (devices/*.yaml)
+globs: devices/**
+alwaysApply: false
+---
+
+# These are reference copies
+
+Files under `devices/` are **not** built from this repo. The real configs live in ESPHome Builder, which provides `common.yaml` and `secrets.yaml`.
+
+- Treat `<<: !include common.yaml` as a placeholder. Assume it provides `wifi`, `api`, `ota`, captive portal, time, etc.
+- Do not invent or commit `common.yaml` / `secrets.yaml` content here.
+- Do not run `esphome config` / `esphome compile` against these files — it will fail on the missing include.
+
+# Custom component references
+
+When a device depends on a component in this repo, reference it remotely:
+
+```yaml
+external_components:
+  - source: github://idlezombie/esphome@<branch-or-tag>
+    components: [<name>]
+    refresh: 0s
+```
+
+- Use a branch name (e.g. `actron_modbus`) during active development.
+- Switch to a tag or commit hash once the component is stable for that device.
+
+# Branching
+
+Each device gets its own branch when actively iterated on (e.g. `feeder`, `roof-louvre`), even if it only touches a single YAML and no custom component. Merge to `main` after the device has been flashed and verified.

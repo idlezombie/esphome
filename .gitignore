@@ -1,0 +1,23 @@
+# ESPHome
+.esphome/
+secrets.yaml
+*.bin
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Editors / IDEs
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Cursor — keep .cursor/rules/ committed; ignore local/secret bits
+.cursor/mcp.json
+.cursor/logs/
+.cursor/*.local.*

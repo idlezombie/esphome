@@ -1,0 +1,34 @@
+---
+description: ESPHome external component conventions
+globs: components/**
+alwaysApply: false
+---
+
+# Layout
+
+Each component lives at `components/<name>/`:
+
+- `__init__.py` — package entry; usually re-exports the platform module (`from .sensor import *`, `from .climate import *`, etc.)
+- `<platform>.py` — Python codegen and `CONFIG_SCHEMA` (`sensor.py`, `climate.py`, ...)
+- `<name>.h` / `<name>.cpp` — C++ implementation in `namespace esphome::<name>`
+
+# Codegen conventions
+
+- Declare config keys as module-level `CONF_*` constants.
+- Use `cv.Optional(..., default=...)` with sensible defaults.
+- Call `await cg.register_component(var, config)` **before** attaching child sensors / platforms.
+- For platforms, also call the matching `register_*` (e.g. `await sensor.new_sensor(...)`, `await climate.register_climate(var, config)`).
+
+# C++ conventions
+
+- Inherit from `Component` / `PollingComponent` plus the relevant base (`i2c::I2CDevice`, `climate::Climate`, ...).
+- Setters on the class are small inline accessors. Do real work in `setup()` / `update()` / `loop()`.
+- Use `ESP_LOGI` / `ESP_LOGW` etc. with a per-component tag.
+
+# Debugging instrumentation
+
+`ESP_LOGI("agent_dbg", ...)` lines are temporary. Strip or guard them before merging to `main`.
+
+# Versioning
+
+When a component reaches a stable point, tag it (e.g. `actron_modbus-v0.2.0`) so device configs can pin to it instead of tracking a branch.

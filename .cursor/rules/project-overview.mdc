@@ -1,0 +1,29 @@
+---
+description: ESPHome personal repo — purpose, layout, and dev workflow
+alwaysApply: true
+---
+
+# What this repo is
+
+Personal ESPHome project. Contents:
+
+- `components/` — custom external ESPHome components. Source of truth, consumed by configs via `external_components: github://idlezombie/esphome@<branch-or-tag>`.
+- `devices/` — reference / backup copies of device YAML configs.
+
+# What this repo is NOT
+
+- It is **not** a self-contained ESPHome project.
+- `common.yaml` and `secrets.yaml` live inside the ESPHome Builder install, not in this repo.
+- Do **not** run `esphome config` / `esphome compile` against `devices/*.yaml`. They `!include common.yaml`, which is intentionally absent here.
+- The actual deployed configs are edited and built inside ESPHome Builder; the device YAMLs here are reference copies.
+
+# Dev workflow
+
+- One branch per component or device under development (e.g. `actron_modbus`, `mpu6050_tilt`, `feeder`). Even single-file device-only work gets its own branch.
+- `main` holds things that have been flashed and verified.
+- Prefer pinning device configs to tags/commits once a component is stable; use branches during active development.
+
+# Tooling
+
+- Repo is open in both Cursor and Sublime Merge. Only one tool should perform git mutations (commit / checkout / rebase) at a time. Read-only operations in parallel are fine.
+- Never commit `secrets.yaml` or anything matching `.gitignore`.
