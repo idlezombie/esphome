@@ -11,21 +11,30 @@ commit message (e.g. `feeder: relax REQ-D6 to 3s`).
 
 ## States
 
-- **REQ-S1**: `feeder_status_state` is one of: `idle`, `dispensing`, `back_off`, `success`, `jammed`, `hopper_empty`.
+- **REQ-S1**: `feeder_status_state` is one of: `idle`, `dispensing`, `back_off`, `success`, `jammed`, `hopper_empty`, `bowl_missing`.
 - **REQ-S2**: `motor_jammed_state` clears only on a successful dispense.
 - **REQ-S3**: `hopper_empty` auto-clears to `idle` when the hopper sensor reports non-empty.
 - **REQ-S4**: `back_off` is the transient state during the reverse-then-retry phase.
-- **REQ-S5**: While `dispensing` or `success`, status overrides (jammed / hopper_empty) from the periodic interval are suppressed.
+- **REQ-S5**: While `dispensing` or `success`, status overrides (jammed / bowl_missing / hopper_empty) from the periodic interval are suppressed.
+- **REQ-S6**: `bowl_missing` auto-clears to `idle` once the bowl is detected on the scale again (and the hopper is not empty).
+- **REQ-S7**: Periodic status priority is `jammed` > `bowl_missing` > `hopper_empty`.
 
 ## Dispense
 
 - **REQ-D1**: Normal dispense is blocked when `motor_jammed_state` is true.
 - **REQ-D2**: Normal dispense is blocked when the hopper sensor reads empty.
-- **REQ-D3**: Force dispense bypasses both REQ-D1 and REQ-D2.
+- **REQ-D2b**: Normal dispense is blocked when `bowl_missing` is true (checked before the hopper, both at entry and at the back-off retry re-check). Blocking sets status `bowl_missing` and clears `soft_fail_pending`.
+- **REQ-D3**: Force dispense bypasses REQ-D1, REQ-D2, and REQ-D2b.
 - **REQ-D4**: Manual button press 20–800ms triggers normal dispense.
 - **REQ-D5**: Manual button press 800ms–5s triggers force dispense.
 - **REQ-D6**: Status returns to `idle` 2s after a successful dispense.
 - **REQ-D7**: Tacho timeout for a forward attempt is 2.3s.
+
+## Bowl detection
+
+- **REQ-B1**: The bowl is considered missing when `scale_feeder_weight.state < -10g`, sustained for 2s (`delayed_on: 2s`, `delayed_off: 1s`) via the `bowl_missing` binary sensor.
+- **REQ-B2**: Detection uses the calibrated, pre-tare reading. The `calibrate_linear` zero point was set with the empty bowl present, so a removed bowl extrapolates strongly negative (~ -bowl_mass). The bowl's absolute mass is not stored or required, and the tare offset is intentionally NOT subtracted (the 10g margin dwarfs expected drift).
+- **REQ-B3**: The calibration must not be removed — it is what anchors "empty bowl present" to 0g and makes REQ-B1 a simple fixed threshold.
 
 ## Failure handling
 
@@ -37,7 +46,7 @@ commit message (e.g. `feeder: relax REQ-D6 to 3s`).
 ## LEDs
 
 - **REQ-L1**: Error LED solid when status == `jammed`.
-- **REQ-L2**: Error LED blinks (~1Hz) when status == `hopper_empty`.
+- **REQ-L2**: Error LED blinks (~1Hz) when status == `hopper_empty` or `bowl_missing` (shared pattern; distinguish via the Status text sensor).
 - **REQ-L3**: Wifi LED solid when connected, blinks when not.
 - **REQ-L4**: Status LED power switch defaults OFF at boot (`RESTORE_DEFAULT_OFF`).
 - **REQ-L5**: Diagnostics LED is the ESP32 status_led on GPIO15.

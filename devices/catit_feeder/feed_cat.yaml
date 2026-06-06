@@ -1,0 +1,46 @@
+alias: Feed Cat
+description: ""
+triggers:
+  - trigger: numeric_state
+    entity_id:
+      - sensor.pet_feeder_dispensed_weight
+    for:
+      hours: 0
+      minutes: 5
+      seconds: 0
+    below: 8
+conditions: []
+actions:
+  - variables:
+      prev_weight: -1
+  - repeat:
+      until:
+        - condition: or
+          conditions:
+            - condition: numeric_state
+              entity_id: sensor.pet_feeder_dispensed_weight
+              above: 30
+            - condition: numeric_state
+              entity_id: sensor.pet_feeder_dispensed_weight
+              below: 0
+            - condition: state
+              entity_id: sensor.pet_feeder_status
+              state:
+                - Jammed
+            - condition: template
+              value_template: |-
+                {{ states('sensor.pet_feeder_dispensed_weight') | int <=
+                 prev_weight }}
+      sequence:
+        - action: button.press
+          metadata: {}
+          data: {}
+          target:
+            entity_id: button.pet_feeder_dispense
+        - wait_template: "{{ states('sensor.pet_feeder_status') in ['Success', 'Idle'] }}"
+          continue_on_timeout: false
+          timeout: "6"
+        - variables:
+            prev_weight: "{{ states('sensor.pet_feeder_dispensed_weight') | int }}"
+          enabled: false
+mode: single

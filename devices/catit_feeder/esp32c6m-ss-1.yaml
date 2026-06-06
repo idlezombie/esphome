@@ -70,7 +70,7 @@ sensor:
           - -660472 -> 10.8
           - -670064 -> 46.5
       - sliding_window_moving_average:
-          window_size: 8
+          window_size: 4
           send_every: 1
       - lambda: |-
           if (x > -0.2f && x < 0.2f) {
@@ -117,6 +117,7 @@ text_sensor:
       if (status == "success") return {"Success"};
       if (status == "jammed") return {"Jammed"};
       if (status == "hopper_empty") return {"Hopper Empty"};
+      if (status == "bowl_missing") return {"Bowl Missing"};
       return status;
   - platform: template
     name: "Motor State"
@@ -172,6 +173,19 @@ binary_sensor:
     filters:
       - delayed_off: 500ms
 
+  - platform: template
+    id: bowl_missing
+    name: "Bowl Missing"
+    entity_category: diagnostic
+    device_class: problem
+    lambda: |-
+      // Calibration zero == empty bowl present, so a removed bowl reads
+      // strongly negative (~ -bowl_mass). Pre-tare value, drift-immune.
+      return id(scale_feeder_weight).state < -10.0f;
+    filters:
+      - delayed_on: 2s
+      - delayed_off: 1s
+
 output:
   - platform: gpio
     pin: GPIO22
@@ -224,15 +238,21 @@ interval:
           else:
             - if:
                 condition:
-                  lambda: 'return id(gpio_hop_rx).state && id(feeder_status_state) != "dispensing" && id(feeder_status_state) != "success";'
+                  lambda: 'return id(bowl_missing).state && id(feeder_status_state) != "dispensing" && id(feeder_status_state) != "success";'
                 then:
-                  - lambda: 'id(feeder_status_state) = "hopper_empty";'
+                  - lambda: 'id(feeder_status_state) = "bowl_missing";'
                 else:
                   - if:
                       condition:
-                        lambda: 'return !id(gpio_hop_rx).state && id(feeder_status_state) == "hopper_empty";'
+                        lambda: 'return id(gpio_hop_rx).state && id(feeder_status_state) != "dispensing" && id(feeder_status_state) != "success";'
                       then:
-                        - lambda: 'id(feeder_status_state) = "idle";'
+                        - lambda: 'id(feeder_status_state) = "hopper_empty";'
+                      else:
+                        - if:
+                            condition:
+                              lambda: 'return !id(gpio_hop_rx).state && !id(bowl_missing).state && (id(feeder_status_state) == "hopper_empty" || id(feeder_status_state) == "bowl_missing");'
+                            then:
+                              - lambda: 'id(feeder_status_state) = "idle";'
       - if:
           condition:
             lambda: 'return id(feeder_status_state) == "jammed";'
@@ -241,7 +261,7 @@ interval:
           else:
             - if:
                 condition:
-                  lambda: 'return id(feeder_status_state) == "hopper_empty";'
+                  lambda: 'return id(feeder_status_state) == "hopper_empty" || id(feeder_status_state) == "bowl_missing";'
                 then:
                   - lambda: 'id(error_led_blink_state) = !id(error_led_blink_state);'
                   - if:
@@ -362,6 +382,7 @@ script:
           id: motor_dispense_core
           ignore_hopper_check: false
           ignore_jam_check: false
+          ignore_bowl_check: false
 
   - id: force_dispense_once
     mode: single
@@ -370,12 +391,14 @@ script:
           id: motor_dispense_core
           ignore_hopper_check: true
           ignore_jam_check: true
+          ignore_bowl_check: true
 
   - id: motor_dispense_core
     mode: single
     parameters:
       ignore_hopper_check: bool
       ignore_jam_check: bool
+      ignore_bowl_check: bool
     then:
       - if:
           condition:
@@ -387,12 +410,16 @@ script:
           else:
             - if:
                 condition:
-                  lambda: 'return !ignore_hopper_check && id(gpio_hop_rx).state;'
+                  lambda: 'return (!ignore_bowl_check && id(bowl_missing).state) || (!ignore_hopper_check && id(gpio_hop_rx).state);'
                 then:
                   - lambda: |-
-                      id(feeder_status_state) = "hopper_empty";
+                      if (!ignore_bowl_check && id(bowl_missing).state) {
+                        id(feeder_status_state) = "bowl_missing";
+                      } else {
+                        id(feeder_status_state) = "hopper_empty";
+                      }
                       id(soft_fail_pending) = false;
-                  - logger.log: "Dispense blocked: hopper empty"
+                  - logger.log: "Dispense blocked: bowl missing or hopper empty"
                   - script.execute:
                       id: motor_set_direction_primary
                       direction: "off"
@@ -443,19 +470,23 @@ script:
                         - script.execute:
                             id: motor_set_direction_primary
                             direction: "reverse"
-                        - delay: 500ms
+                        - delay: 100ms
                         - script.execute:
                             id: motor_set_direction_primary
                             direction: "off"
                         - delay: 100ms
                         - if:
                             condition:
-                              lambda: 'return !ignore_hopper_check && id(gpio_hop_rx).state;'
+                              lambda: 'return (!ignore_bowl_check && id(bowl_missing).state) || (!ignore_hopper_check && id(gpio_hop_rx).state);'
                             then:
                               - lambda: |-
-                                  id(feeder_status_state) = "hopper_empty";
+                                  if (!ignore_bowl_check && id(bowl_missing).state) {
+                                    id(feeder_status_state) = "bowl_missing";
+                                  } else {
+                                    id(feeder_status_state) = "hopper_empty";
+                                  }
                                   id(soft_fail_pending) = false;
-                              - logger.log: "Retry blocked: hopper empty"
+                              - logger.log: "Retry blocked: bowl missing or hopper empty"
                             else:
                               - wait_until:
                                   condition:
@@ -496,5 +527,7 @@ script:
                                               id(feeder_status_state) = "jammed";
                                           - logger.log: "Second consecutive soft fail, motor marked jammed"
                                         else:
-                                          - lambda: id(soft_fail_pending) = true;
+                                          - lambda: |-
+                                              id(soft_fail_pending) = true;
+                                              id(feeder_status_state) = "idle";
                                           - logger.log: "Soft fail recorded, waiting for next dispense attempt"
