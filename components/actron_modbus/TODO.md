@@ -17,23 +17,22 @@ by the time you read this — verify against the current code before starting.
 
 ## Bugs
 
-- [ ] Modbus command collision / duplication errors showing in ESP logs.
-      Removing the standalone `modbus_controller` entities that polled the same
-      registers as the climate component (power 1, fan 4, mode 101, setpoint 102,
-      room temp 851) should cut the duplicate reads — verify after flashing.
-      Likely also tied to the Modbus timing review below.
-- [ ] On firmware update / reboot the device loses current status and the AC ends
-      up turned OFF (annoying). Hypothesis: the standalone "Power" switch was
-      restoring to OFF on boot and writing 0 to the power register; now removed, so
-      re-check after flashing. If it persists, investigate restore-on-boot behaviour
-      and whether anything writes control registers during startup.
+- [ ] Modbus command collision / duplication errors in ESP logs — STILL PRESENT
+      after removing the duplicate-polling standalone entities, so they were not the
+      (only) cause. Investigate the climate component's own read/write queueing
+      (`request_reads_` queues 5 reads every `update()` while writes are dispatched
+      separately from `loop()`) and how it interacts with the `modbus_controller`
+      command queue. Tie in with the Modbus behaviour/timing review below.
+- [x] On firmware update / reboot the device lost current status and the AC ended up
+      turned OFF. FIXED — caused by the standalone "Power" switch restoring to OFF on
+      boot and writing 0 to the power register; removing it resolved it. Confirmed on
+      hardware.
 
 ## Home Assistant integration
 
 - [x] Remove standalone controls now duplicated by the climate entity (power switch,
       temperature slider, AC mode select, fan speed select) and their backing raw
-      registers, in `devices/esp32c3m-ss-2.yaml`. Pending mirror into ESPHome Builder
-      + flash/verify.
+      registers, in `devices/esp32c3m-ss-2.yaml`. Applied and verified on hardware.
 - [ ] Integrate the controls not represented by the climate entity: continuous fan
       mode (`ac_fan_cont` / reg 105) and zone controls (`ac_raw_zone_*` / regs
       5001-5002). Kept as standalone entities for now.
@@ -44,7 +43,7 @@ by the time you read this — verify against the current code before starting.
       raw registers `internal`; made the zone switches normal controls (dropped
       `entity_category: diagnostic`). No raw-register entities exposed now; kept the
       feedback sensors (coil temp, compressor demand, fan speed demand) and the
-      Indoor Unit Comms Status watchdog. Pending mirror into ESPHome Builder + flash.
+      Indoor Unit Comms Status watchdog. Applied and verified on hardware.
 
 ## Performance optimisation (next focus)
 
