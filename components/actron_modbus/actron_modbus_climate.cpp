@@ -111,6 +111,15 @@ void ActronModbusClimate::update() {
   if (this->parent_ == nullptr) {
     return;
   }
+
+  if (this->pending_read_callbacks_ != 0) {
+    if ((millis() - this->read_batch_started_ms_) < this->settle_timeout_ms_) {
+      return;
+    }
+    ESP_LOGW(TAG, "Read batch timed out with %u callbacks outstanding", this->pending_read_callbacks_);
+    this->pending_read_callbacks_ = 0;
+  }
+
   this->request_reads_();
 }
 
@@ -118,6 +127,7 @@ void ActronModbusClimate::dump_config() {
   ESP_LOGCONFIG(TAG, "Actron Modbus Climate:");
   ESP_LOGCONFIG(TAG, "  Optimistic: %s", YESNO(this->optimistic_));
   ESP_LOGCONFIG(TAG, "  Command interval: %ums", this->command_interval_ms_);
+  ESP_LOGCONFIG(TAG, "  Settle timeout: %ums", this->settle_timeout_ms_);
   ESP_LOGCONFIG(TAG, "  Register power: %u", this->power_register_);
   ESP_LOGCONFIG(TAG, "  Register fan: %u", this->fan_register_);
   ESP_LOGCONFIG(TAG, "  Register mode: %u", this->mode_register_);
@@ -187,7 +197,6 @@ void ActronModbusClimate::control(const climate::ClimateCall &call) {
   }
 
   if (changed && this->optimistic_) {
-    this->last_publish_was_device_ = false;
     this->publish_state();
   }
 }
@@ -196,25 +205,39 @@ void ActronModbusClimate::request_reads_() {
   using modbus_controller::ModbusCommandItem;
   using modbus::ModbusRegisterType;
 
+  uint32_t generation = ++this->read_generation_;
+  this->pending_read_callbacks_ = 5;
+  this->read_batch_started_ms_ = millis();
+
   this->parent_->queue_command(ModbusCommandItem::create_read_command(
       this->parent_, ModbusRegisterType::HOLDING, this->power_register_, 1,
-      [this](ModbusRegisterType, uint16_t, const std::vector<uint8_t> &data) { this->handle_power_read_(data); }));
+      [this, generation](ModbusRegisterType, uint16_t, const std::vector<uint8_t> &data) {
+        this->handle_power_read_(data, generation);
+      }));
 
   this->parent_->queue_command(ModbusCommandItem::create_read_command(
       this->parent_, ModbusRegisterType::HOLDING, this->fan_register_, 1,
-      [this](ModbusRegisterType, uint16_t, const std::vector<uint8_t> &data) { this->handle_fan_read_(data); }));
+      [this, generation](ModbusRegisterType, uint16_t, const std::vector<uint8_t> &data) {
+        this->handle_fan_read_(data, generation);
+      }));
 
   this->parent_->queue_command(ModbusCommandItem::create_read_command(
       this->parent_, ModbusRegisterType::HOLDING, this->mode_register_, 1,
-      [this](ModbusRegisterType, uint16_t, const std::vector<uint8_t> &data) { this->handle_mode_read_(data); }));
+      [this, generation](ModbusRegisterType, uint16_t, const std::vector<uint8_t> &data) {
+        this->handle_mode_read_(data, generation);
+      }));
 
   this->parent_->queue_command(ModbusCommandItem::create_read_command(
       this->parent_, ModbusRegisterType::HOLDING, this->setpoint_register_, 1,
-      [this](ModbusRegisterType, uint16_t, const std::vector<uint8_t> &data) { this->handle_setpoint_read_(data); }));
+      [this, generation](ModbusRegisterType, uint16_t, const std::vector<uint8_t> &data) {
+        this->handle_setpoint_read_(data, generation);
+      }));
 
   this->parent_->queue_command(ModbusCommandItem::create_read_command(
       this->parent_, ModbusRegisterType::HOLDING, this->room_temp_register_, 1,
-      [this](ModbusRegisterType, uint16_t, const std::vector<uint8_t> &data) { this->handle_room_temp_read_(data); }));
+      [this, generation](ModbusRegisterType, uint16_t, const std::vector<uint8_t> &data) {
+        this->handle_room_temp_read_(data, generation);
+      }));
 }
 
 void ActronModbusClimate::dispatch_next_write_() {
@@ -233,9 +256,54 @@ void ActronModbusClimate::queue_or_replace_(PendingType type, uint16_t reg, uint
   if (it != this->pending_.end()) {
     it->reg = reg;
     it->value = value;
+    this->mark_expected_(type, value);
     return;
   }
   this->pending_.push_back(PendingCommand{type, reg, value});
+  this->mark_expected_(type, value);
+}
+
+void ActronModbusClimate::mark_expected_(PendingType type, uint16_t value) {
+  if (!this->optimistic_) {
+    return;
+  }
+
+  FieldGuard *guard = nullptr;
+  switch (type) {
+    case PendingType::POWER:
+      guard = &this->guard_power_;
+      break;
+    case PendingType::MODE:
+      guard = &this->guard_mode_;
+      break;
+    case PendingType::SETPOINT:
+      guard = &this->guard_setpoint_;
+      break;
+    case PendingType::FAN:
+      guard = &this->guard_fan_;
+      break;
+  }
+
+  guard->expected = value;
+  guard->since_ms = millis();
+}
+
+uint16_t ActronModbusClimate::guarded_raw_(FieldGuard &guard, uint16_t raw) {
+  if (!guard.expected.has_value()) {
+    return raw;
+  }
+
+  if (raw == *guard.expected) {
+    guard.expected.reset();
+    return raw;
+  }
+
+  if ((millis() - guard.since_ms) < this->settle_timeout_ms_) {
+    return *guard.expected;
+  }
+
+  guard.expected.reset();
+  return raw;
 }
 
 void ActronModbusClimate::publish_and_save_() {
@@ -244,9 +312,14 @@ void ActronModbusClimate::publish_and_save_() {
     return;
   }
 
-  this->mode = mode_from_raw(*this->raw_power_, *this->raw_mode_);
-  this->fan_mode = fan_from_raw(*this->raw_fan_);
-  this->target_temperature = float(*this->raw_setpoint_) * 0.1f;
+  uint16_t power = this->guarded_raw_(this->guard_power_, *this->raw_power_);
+  uint16_t mode = this->guarded_raw_(this->guard_mode_, *this->raw_mode_);
+  uint16_t fan = this->guarded_raw_(this->guard_fan_, *this->raw_fan_);
+  uint16_t setpoint = this->guarded_raw_(this->guard_setpoint_, *this->raw_setpoint_);
+
+  this->mode = mode_from_raw(power, mode);
+  this->fan_mode = fan_from_raw(fan);
+  this->target_temperature = float(setpoint) * 0.1f;
   if (this->raw_room_temp_.has_value()) {
     this->current_temperature = float(*this->raw_room_temp_) * 0.1f;
   }
@@ -263,33 +336,59 @@ void ActronModbusClimate::publish_and_save_() {
     this->action = climate::CLIMATE_ACTION_IDLE;
   }
 
-  this->last_publish_was_device_ = true;
   this->publish_state();
 }
 
-void ActronModbusClimate::handle_power_read_(const std::vector<uint8_t> &data) {
+void ActronModbusClimate::finish_read_(uint32_t generation) {
+  if (generation != this->read_generation_) {
+    return;
+  }
+  if (this->pending_read_callbacks_ > 0) {
+    this->pending_read_callbacks_--;
+  }
+  if (this->pending_read_callbacks_ == 0) {
+    this->publish_and_save_();
+  }
+}
+
+void ActronModbusClimate::handle_power_read_(const std::vector<uint8_t> &data, uint32_t generation) {
+  if (generation != this->read_generation_) {
+    return;
+  }
   this->raw_power_ = parse_u16(data);
-  this->publish_and_save_();
+  this->finish_read_(generation);
 }
 
-void ActronModbusClimate::handle_fan_read_(const std::vector<uint8_t> &data) {
+void ActronModbusClimate::handle_fan_read_(const std::vector<uint8_t> &data, uint32_t generation) {
+  if (generation != this->read_generation_) {
+    return;
+  }
   this->raw_fan_ = parse_u16(data);
-  this->publish_and_save_();
+  this->finish_read_(generation);
 }
 
-void ActronModbusClimate::handle_mode_read_(const std::vector<uint8_t> &data) {
+void ActronModbusClimate::handle_mode_read_(const std::vector<uint8_t> &data, uint32_t generation) {
+  if (generation != this->read_generation_) {
+    return;
+  }
   this->raw_mode_ = parse_u16(data);
-  this->publish_and_save_();
+  this->finish_read_(generation);
 }
 
-void ActronModbusClimate::handle_setpoint_read_(const std::vector<uint8_t> &data) {
+void ActronModbusClimate::handle_setpoint_read_(const std::vector<uint8_t> &data, uint32_t generation) {
+  if (generation != this->read_generation_) {
+    return;
+  }
   this->raw_setpoint_ = parse_u16(data);
-  this->publish_and_save_();
+  this->finish_read_(generation);
 }
 
-void ActronModbusClimate::handle_room_temp_read_(const std::vector<uint8_t> &data) {
+void ActronModbusClimate::handle_room_temp_read_(const std::vector<uint8_t> &data, uint32_t generation) {
+  if (generation != this->read_generation_) {
+    return;
+  }
   this->raw_room_temp_ = parse_u16(data);
-  this->publish_and_save_();
+  this->finish_read_(generation);
 }
 
 }  // namespace actron_modbus
