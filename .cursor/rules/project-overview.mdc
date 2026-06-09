@@ -26,4 +26,5 @@ Personal ESPHome project. Contents:
 # Tooling
 
 - Repo is open in both Cursor and Sublime Merge. Only one tool should perform git mutations (commit / checkout / rebase) at a time. Read-only operations in parallel are fine.
+- This machine: Windows + PowerShell. `git` is not on `PATH`; use the Git bundled with Sublime Merge: `C:\Program Files\Sublime Merge\Git\cmd\git.exe`.
 - Never commit `secrets.yaml` or anything matching `.gitignore`.
