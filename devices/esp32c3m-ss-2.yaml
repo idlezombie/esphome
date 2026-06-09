@@ -65,7 +65,7 @@ number:
   - platform: modbus_controller
     modbus_controller_id: actron_ac
     name: "Raw Continuous Fan Register"
-    entity_category: diagnostic
+    internal: true
     id: ac_raw_fan_cont
     register_type: holding
     address: 105
@@ -86,7 +86,6 @@ switch:
     modbus_controller_id: actron_ac
     name: "Zone: Upstairs"
     id: ac_raw_zone_upstairs
-    entity_category: diagnostic
     register_type: holding
     address: 5001
     bitmask: 0x0001
@@ -100,7 +99,6 @@ switch:
     modbus_controller_id: actron_ac
     name: "Zone: Downstairs"
     id: ac_raw_zone_downstairs
-    entity_category: diagnostic
     register_type: holding
     address: 5002
     bitmask: 0x0001
@@ -145,19 +143,6 @@ sensor:
 
   - platform: modbus_controller
     modbus_controller_id: actron_ac
-    name: "Room Temperature"
-    id: ac_raw_room_temp
-    entity_category: diagnostic
-    unit_of_measurement: "°C"
-    value_type: U_WORD
-    register_type: holding
-    address: 851
-    accuracy_decimals: 1
-    filters:
-      - multiply: 0.1
-
-  - platform: modbus_controller
-    modbus_controller_id: actron_ac
     name: "Indoor Coil Temperature"
     id: ac_raw_coil_temp
     entity_category: diagnostic
@@ -174,7 +159,7 @@ sensor:
   - platform: modbus_controller
     modbus_controller_id: actron_ac
     name: "Raw Indoor Comms Register"
-    entity_category: diagnostic
+    internal: true
     id: ac_raw_indoor_comms
     unit_of_measurement: ""
     accuracy_decimals: 0
@@ -191,21 +176,6 @@ sensor:
     accuracy_decimals: 1
     register_type: holding
     address: 1104
-    value_type: U_WORD
-    lambda: |-
-      return x * 0.1;
-    filters:
-      - throttle_average: 10s
-
-  - platform: modbus_controller
-    modbus_controller_id: actron_ac
-    name: "Compressor EEV Position"
-    id: ac_raw_compressor_eev_position
-    entity_category: diagnostic
-    unit_of_measurement: "%"
-    accuracy_decimals: 1
-    register_type: holding
-    address: 1401
     value_type: U_WORD
     lambda: |-
       return x * 0.1;

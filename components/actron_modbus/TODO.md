@@ -19,9 +19,8 @@ by the time you read this — verify against the current code before starting.
 
 - [ ] Modbus command collision / duplication errors showing in ESP logs.
       Removing the standalone `modbus_controller` entities that polled the same
-      registers as the climate component (power 1, fan 4, mode 101, setpoint 102)
-      should cut the duplicate reads — verify after flashing. Note: room temp (851)
-      is still read by both the climate entity and the "Room Temperature" sensor.
+      registers as the climate component (power 1, fan 4, mode 101, setpoint 102,
+      room temp 851) should cut the duplicate reads — verify after flashing.
       Likely also tied to the Modbus timing review below.
 - [ ] On firmware update / reboot the device loses current status and the AC ends
       up turned OFF (annoying). Hypothesis: the standalone "Power" switch was
@@ -40,8 +39,12 @@ by the time you read this — verify against the current code before starting.
       5001-5002). Kept as standalone entities for now.
 - [ ] Build a companion automation to manage AC control based on house temperature
       settings and other variables.
-- [ ] Review remaining diagnostic entities (raw feedback registers) and hide/remove
-      any not wanted in HA.
+- [x] Trim diagnostic/raw entities: removed Room Temperature (dup of climate) and
+      Compressor EEV Position (no value); made the Continuous Fan and Indoor Comms
+      raw registers `internal`; made the zone switches normal controls (dropped
+      `entity_category: diagnostic`). No raw-register entities exposed now; kept the
+      feedback sensors (coil temp, compressor demand, fan speed demand) and the
+      Indoor Unit Comms Status watchdog. Pending mirror into ESPHome Builder + flash.
 
 ## Performance optimisation (next focus)
 
