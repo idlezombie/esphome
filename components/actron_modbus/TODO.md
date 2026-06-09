@@ -18,16 +18,30 @@ by the time you read this — verify against the current code before starting.
 ## Bugs
 
 - [ ] Modbus command collision / duplication errors showing in ESP logs.
-      Investigate whether reads and writes are colliding in the queue, or commands
-      are being issued twice. Likely tied to the Modbus timing review below.
+      Removing the standalone `modbus_controller` entities that polled the same
+      registers as the climate component (power 1, fan 4, mode 101, setpoint 102)
+      should cut the duplicate reads — verify after flashing. Note: room temp (851)
+      is still read by both the climate entity and the "Room Temperature" sensor.
+      Likely also tied to the Modbus timing review below.
+- [ ] On firmware update / reboot the device loses current status and the AC ends
+      up turned OFF (annoying). Hypothesis: the standalone "Power" switch was
+      restoring to OFF on boot and writing 0 to the power register; now removed, so
+      re-check after flashing. If it persists, investigate restore-on-boot behaviour
+      and whether anything writes control registers during startup.
 
 ## Home Assistant integration
 
-- [ ] Complete the custom thermal/climate entity setup in HA, including additional
-      zone controls.
+- [x] Remove standalone controls now duplicated by the climate entity (power switch,
+      temperature slider, AC mode select, fan speed select) and their backing raw
+      registers, in `devices/esp32c3m-ss-2.yaml`. Pending mirror into ESPHome Builder
+      + flash/verify.
+- [ ] Integrate the controls not represented by the climate entity: continuous fan
+      mode (`ac_fan_cont` / reg 105) and zone controls (`ac_raw_zone_*` / regs
+      5001-5002). Kept as standalone entities for now.
 - [ ] Build a companion automation to manage AC control based on house temperature
       settings and other variables.
-- [ ] Clean up non-climate entities currently being rendered / exposed by ESPHome.
+- [ ] Review remaining diagnostic entities (raw feedback registers) and hide/remove
+      any not wanted in HA.
 
 ## Performance optimisation (next focus)
 

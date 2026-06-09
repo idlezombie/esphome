@@ -64,64 +64,6 @@ number:
   # Control Registers
   - platform: modbus_controller
     modbus_controller_id: actron_ac
-    name: "Raw Power Register"
-    entity_category: diagnostic
-    id: ac_raw_power
-    register_type: holding
-    address: 1
-    value_type: U_WORD
-    min_value: 0
-    max_value: 1
-    step: 1
-    #region agent log
-    on_value:
-      - lambda: |-
-          ESP_LOGI("agent_dbg", "H1 raw_power poll value=%.0f ms=%lu", x, millis());
-    #endregion
-
-  - platform: modbus_controller
-    modbus_controller_id: actron_ac
-    name: "Raw Fan Speed Register"
-    entity_category: diagnostic
-    id: ac_raw_fan_speed
-    register_type: holding
-    address: 4
-    value_type: U_WORD
-    min_value: 1
-    max_value: 3
-    step: 1
-
-  - platform: modbus_controller
-    modbus_controller_id: actron_ac
-    name: "Raw Mode Register"
-    entity_category: diagnostic
-    id: ac_raw_mode
-    register_type: holding
-    address: 101
-    value_type: U_WORD
-    min_value: 1
-    max_value: 4
-    step: 1
-
-  - platform: modbus_controller
-    modbus_controller_id: actron_ac
-    name: "Raw Setpoint Register"
-    entity_category: diagnostic
-    id: ac_raw_setpoint
-    register_type: holding
-    address: 102
-    value_type: U_WORD
-    min_value: 160
-    max_value: 300
-    step: 5
-    #region agent log
-    on_value:
-      - lambda: |-
-          ESP_LOGI("agent_dbg", "H1 raw_setpoint poll value=%.0f ms=%lu", x, millis());
-    #endregion
-
-  - platform: modbus_controller
-    modbus_controller_id: actron_ac
     name: "Raw Continuous Fan Register"
     entity_category: diagnostic
     id: ac_raw_fan_cont
@@ -136,28 +78,6 @@ number:
       - lambda: |-
           ESP_LOGI("agent_dbg", "H1 raw_fan_cont poll value=%.0f ms=%lu", x, millis());
     #endregion
-
-  # Control Template Wrappers
-  - platform: template
-    id: ac_setpoint
-    name: "Temperature"
-    unit_of_measurement: "°C"
-    min_value: 16.0
-    max_value: 30.0
-    step: 0.5
-    lambda: |-
-      return id(ac_raw_setpoint).state * 0.1;
-    set_action:
-      #region agent log
-      - lambda: |-
-          ESP_LOGI("agent_dbg", "H3 ac_setpoint set_action requested=%.1f ms=%lu", x, millis());
-      #endregion
-      - lambda: |-
-          int raw = (int)(x * 10.0);
-          id(ac_raw_setpoint).publish_state(raw);
-      - number.set:
-          id: ac_raw_setpoint
-          value: !lambda 'return (int)(x * 10.0);'
 
 #------------------------------------------
 switch:
@@ -192,20 +112,6 @@ switch:
 
   # Control Template Wrappers
   - platform: template
-    name: "Power"
-    id: ac_power
-    lambda: |-
-      return (id(ac_raw_power).state == 1);
-    turn_on_action:
-      - number.set:
-          id: ac_raw_power
-          value: 1
-    turn_off_action:
-      - number.set:
-          id: ac_raw_power
-          value: 0
-
-  - platform: template
     name: "Continuous Fan"
     id: ac_fan_cont
     lambda: |-
@@ -218,76 +124,6 @@ switch:
       - number.set:
           id: ac_raw_fan_cont
           value: 0
-
-select:
-  - platform: template
-    name: "AC Mode"
-    id: ac_mode
-    options:
-      - "Heat"
-      - "Cool"
-      - "Auto"
-      - "Fan Only"
-    lambda: |-
-      switch ((int)id(ac_raw_mode).state) {
-        case 1: return std::string("Heat");
-        case 2: return std::string("Cool");
-        case 3: return std::string("Auto");
-        case 4: return std::string("Fan Only");
-        default: return std::string("Auto");
-      }
-    set_action:
-      - lambda: |-
-          if (x == "Heat") {
-            id(ac_raw_mode).publish_state(1);
-          } else if (x == "Cool") {
-            id(ac_raw_mode).publish_state(2);
-          } else if (x == "Auto") {
-            id(ac_raw_mode).publish_state(3);
-          } else if (x == "Fan Only") {
-            id(ac_raw_mode).publish_state(4);
-          }
-      - number.set:
-          id: ac_raw_mode
-          value: !lambda |-
-            if (x == "Heat") return 1;
-            if (x == "Cool") return 2;
-            if (x == "Auto") return 3;
-            if (x == "Fan Only") return 4;
-            return 3;
-
-
-  - platform: template
-    name: "Fan Speed"
-    id: ac_fan_speed
-    options:
-      - "Low"
-      - "Medium"
-      - "High"
-    lambda: |-
-      switch ((int)id(ac_raw_fan_speed).state) {
-        case 1: return std::string("Low");
-        case 2: return std::string("Medium");
-        case 3: return std::string("High");
-        default: return std::string("Low");
-      }
-    set_action:
-      - lambda: |-
-          if (x == "Low") {
-            id(ac_raw_fan_speed).publish_state(1);
-          } else if (x == "Medium") {
-            id(ac_raw_fan_speed).publish_state(2);
-          } else if (x == "High") {
-            id(ac_raw_fan_speed).publish_state(3);
-          }
-
-      - number.set:
-          id: ac_raw_fan_speed
-          value: !lambda |-
-            if (x == "Low") return 1;
-            if (x == "Medium") return 2;
-            if (x == "High") return 3;
-            return 1;
 
 #------------------------------------------
 sensor:
