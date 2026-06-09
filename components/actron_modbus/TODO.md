@@ -6,15 +6,28 @@ by the time you read this — verify against the current code before starting.
 
 ## Verification (blocking before merge to `main`)
 
-- [ ] Flash and verify the HA UI sync fix on real hardware. `main` only holds
-      flashed + verified work; this is currently on the `actron_modbus` branch.
-      Confirm the old "accept → revert to old → snap back to new" toggle is gone
-      for target temp, power/mode, and fan changes.
+- [x] Flash and verify the HA UI sync fix on real hardware. Confirmed working —
+      the old "accept → revert to old → snap back to new" toggle is gone. Still on
+      the `actron_modbus` branch; `main` only holds flashed + verified work.
 - [ ] Confirm the timeout fallback works: set a value the unit clamps/rejects and
       check the entity reverts to the device's actual value after `settle_timeout`
       instead of staying stuck on the requested value.
 - [ ] Confirm power on/off vs. mode register coupling looks right in HA (the mode
       register can read a stale non-off value while the unit is off).
+
+## Bugs
+
+- [ ] Modbus command collision / duplication errors showing in ESP logs.
+      Investigate whether reads and writes are colliding in the queue, or commands
+      are being issued twice. Likely tied to the Modbus timing review below.
+
+## Home Assistant integration
+
+- [ ] Complete the custom thermal/climate entity setup in HA, including additional
+      zone controls.
+- [ ] Build a companion automation to manage AC control based on house temperature
+      settings and other variables.
+- [ ] Clean up non-climate entities currently being rendered / exposed by ESPHome.
 
 ## Performance optimisation (next focus)
 
@@ -29,6 +42,10 @@ by the time you read this — verify against the current code before starting.
       it changes slowly and doesn't need the 1s control-register poll rate.
 - [ ] Re-check publish chatter. We now publish once per completed read batch; verify
       there's no remaining redundant `publish_state()` churn.
+- [ ] Review overall Modbus behaviour/timing (poll cadence, command interval, queue
+      usage) for sanity — the initial pattern was lifted from someone else's project
+      and may not be an ideal fit. Likely related to the command collision/duplication
+      bug above.
 
 ## Housekeeping
 
