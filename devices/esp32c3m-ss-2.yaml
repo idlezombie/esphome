@@ -37,7 +37,10 @@ modbus_controller:
   - id: actron_ac
     address: 1
     modbus_id: modbus_1
-    update_interval: 1s
+    # Feedback sensors / zone read-backs are slow-changing; the climate
+    # component polls the control registers at its own (faster) interval.
+    # Keeping this at 1s saturated the bus and caused duplicate-command warnings.
+    update_interval: 5s
 
 climate:
   - platform: actron_modbus

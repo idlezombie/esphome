@@ -17,12 +17,14 @@ by the time you read this — verify against the current code before starting.
 
 ## Bugs
 
-- [ ] Modbus command collision / duplication errors in ESP logs — STILL PRESENT
-      after removing the duplicate-polling standalone entities, so they were not the
-      (only) cause. Investigate the climate component's own read/write queueing
-      (`request_reads_` queues 5 reads every `update()` while writes are dispatched
-      separately from `loop()`) and how it interacts with the `modbus_controller`
-      command queue. Tie in with the Modbus behaviour/timing review below.
+- [ ] Modbus command collision / duplication errors in ESP logs. DIAGNOSED from
+      logs: every warning is for a `modbus_controller`-polled register (703, 906,
+      1104, 1301, 5001/5002), NOT the climate component's regs — so it's bus
+      saturation, not a code collision. Climate (~5 reads/s @ 1s) + controller
+      feedback reads exceeded bus throughput at 9600 baud / `send_wait_time: 100ms`,
+      so each controller `update()` re-queued still-pending reads. FIX APPLIED:
+      raised `modbus_controller` `update_interval` to 5s (climate stays at 1s).
+      Verify the warnings are gone after flashing.
 - [x] On firmware update / reboot the device lost current status and the AC ended up
       turned OFF. FIXED — caused by the standalone "Power" switch restoring to OFF on
       boot and writing 0 to the power register; removing it resolved it. Confirmed on
@@ -60,8 +62,9 @@ by the time you read this — verify against the current code before starting.
       there's no remaining redundant `publish_state()` churn.
 - [ ] Review overall Modbus behaviour/timing (poll cadence, command interval, queue
       usage) for sanity — the initial pattern was lifted from someone else's project
-      and may not be an ideal fit. Likely related to the command collision/duplication
-      bug above.
+      and may not be an ideal fit. Levers: `modbus` `send_wait_time` (100ms is
+      conservative; lower cautiously and test for comms errors), the climate
+      component's own `update_interval`/`command_interval`, and block reads (below).
 
 ## Housekeeping
 
