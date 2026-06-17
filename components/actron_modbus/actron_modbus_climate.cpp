@@ -2,7 +2,6 @@
 
 #include <algorithm>
 #include <cmath>
-#include <cstring>
 
 #include "esphome/core/log.h"
 
@@ -204,8 +203,7 @@ void ActronModbusClimate::control(const climate::ClimateCall &call) {
   }
 
   if (call.has_custom_preset()) {
-    const char *preset = call.get_custom_preset();
-    if (preset != nullptr && std::strcmp(preset, PRESET_CONTINUOUS) == 0) {
+    if (call.get_custom_preset() == PRESET_CONTINUOUS) {
       this->set_custom_preset_(PRESET_CONTINUOUS);
       this->queue_or_replace_(PendingType::CONTINUOUS_FAN, this->continuous_fan_register_, 1);
     } else {
