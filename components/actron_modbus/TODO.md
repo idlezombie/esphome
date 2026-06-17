@@ -73,6 +73,5 @@ by the time you read this — verify against the current code before starting.
 
 - [ ] Tag a stable release (e.g. `actron_modbus-v0.x.0`) once verified so device
       YAMLs can pin to a tag instead of tracking the branch.
-- [ ] Strip any temporary `ESP_LOGI("agent_dbg", ...)` instrumentation before
-      merging to `main`. (The `ESP_LOGW` read-batch-timeout warning in `update()` is
-      intentional — keep it.)
+- [x] Strip temporary `ESP_LOGI("agent_dbg", ...)` instrumentation from device YAML.
+      (The `ESP_LOGW` read-batch-timeout warning in `update()` is intentional — keep it.)
