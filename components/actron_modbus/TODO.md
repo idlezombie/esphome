@@ -12,8 +12,9 @@ by the time you read this — verify against the current code before starting.
 - [ ] Confirm the timeout fallback works: set a value the unit clamps/rejects and
       check the entity reverts to the device's actual value after `settle_timeout`
       instead of staying stuck on the requested value.
-- [ ] Confirm power on/off vs. mode register coupling looks right in HA (the mode
-      register can read a stale non-off value while the unit is off).
+- [x] Confirm power on/off vs. mode register coupling looks right in HA (the mode
+      register can read a stale non-off value while the unit is off). Confirmed
+      working — single climate mode selector with OFF/heat/cool/etc behaves correctly.
 
 ## Bugs
 
@@ -35,9 +36,11 @@ by the time you read this — verify against the current code before starting.
 - [x] Remove standalone controls now duplicated by the climate entity (power switch,
       temperature slider, AC mode select, fan speed select) and their backing raw
       registers, in `devices/esp32c3m-ss-2.yaml`. Applied and verified on hardware.
-- [ ] Integrate the controls not represented by the climate entity: continuous fan
-      mode (`ac_fan_cont` / reg 105) and zone controls (`ac_raw_zone_*` / regs
-      5001-5002). Kept as standalone entities for now.
+- [x] Integrate continuous fan mode (reg 105) into the climate entity as custom
+      presets `Normal` / `Continuous`; removed the standalone Continuous Fan switch.
+      Zone controls (regs 5001-5002) still standalone — pending integration.
+- [ ] Shorten HA climate mode label `fan_only` from "Fan only" to "Fan" (ESPHome
+      cannot rename standard HVAC modes; needs a Home Assistant UI/translation tweak).
 - [ ] Build a companion automation to manage AC control based on house temperature
       settings and other variables.
 - [x] Trim diagnostic/raw entities: removed Room Temperature (dup of climate) and

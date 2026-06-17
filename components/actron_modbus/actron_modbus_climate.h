@@ -24,13 +24,14 @@ class ActronModbusClimate : public climate::Climate, public PollingComponent {
   void set_fan_register(uint16_t reg) { fan_register_ = reg; }
   void set_mode_register(uint16_t reg) { mode_register_ = reg; }
   void set_setpoint_register(uint16_t reg) { setpoint_register_ = reg; }
+  void set_continuous_fan_register(uint16_t reg) { continuous_fan_register_ = reg; }
   void set_room_temp_register(uint16_t reg) { room_temp_register_ = reg; }
   void set_command_interval_ms(uint32_t interval_ms) { command_interval_ms_ = interval_ms; }
   void set_settle_timeout_ms(uint32_t timeout_ms) { settle_timeout_ms_ = timeout_ms; }
   void set_optimistic(bool optimistic) { optimistic_ = optimistic; }
 
  protected:
-  enum class PendingType : uint8_t { POWER, MODE, SETPOINT, FAN };
+  enum class PendingType : uint8_t { POWER, MODE, SETPOINT, FAN, CONTINUOUS_FAN };
   struct PendingCommand {
     PendingType type;
     uint16_t reg;
@@ -54,6 +55,7 @@ class ActronModbusClimate : public climate::Climate, public PollingComponent {
   void handle_fan_read_(const std::vector<uint8_t> &data, uint32_t generation);
   void handle_mode_read_(const std::vector<uint8_t> &data, uint32_t generation);
   void handle_setpoint_read_(const std::vector<uint8_t> &data, uint32_t generation);
+  void handle_continuous_fan_read_(const std::vector<uint8_t> &data, uint32_t generation);
   void handle_room_temp_read_(const std::vector<uint8_t> &data, uint32_t generation);
 
   bool available_{true};
@@ -65,6 +67,7 @@ class ActronModbusClimate : public climate::Climate, public PollingComponent {
   uint16_t fan_register_{4};
   uint16_t mode_register_{101};
   uint16_t setpoint_register_{102};
+  uint16_t continuous_fan_register_{105};
   uint16_t room_temp_register_{851};
 
   uint32_t command_interval_ms_{200};
@@ -78,12 +81,14 @@ class ActronModbusClimate : public climate::Climate, public PollingComponent {
   std::optional<uint16_t> raw_mode_;
   std::optional<uint16_t> raw_fan_;
   std::optional<uint16_t> raw_setpoint_;
+  std::optional<uint16_t> raw_continuous_fan_;
   std::optional<uint16_t> raw_room_temp_;
 
   FieldGuard guard_power_;
   FieldGuard guard_mode_;
   FieldGuard guard_fan_;
   FieldGuard guard_setpoint_;
+  FieldGuard guard_continuous_fan_;
 
   std::vector<PendingCommand> pending_;
 };

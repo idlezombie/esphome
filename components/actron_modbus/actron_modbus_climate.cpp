@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 
 #include "esphome/core/log.h"
 
@@ -9,6 +10,9 @@ namespace esphome {
 namespace actron_modbus {
 
 static const char *const TAG = "actron_modbus.climate";
+
+static const char *const PRESET_NORMAL = "Normal";
+static const char *const PRESET_CONTINUOUS = "Continuous";
 
 static uint16_t parse_u16(const std::vector<uint8_t> &data) {
   if (data.size() < 2) {
@@ -82,6 +86,8 @@ void ActronModbusClimate::setup() {
   this->target_temperature = 24.0f;
   this->current_temperature = NAN;
   this->action = climate::CLIMATE_ACTION_OFF;
+  this->set_supported_custom_presets({PRESET_NORMAL, PRESET_CONTINUOUS});
+  this->set_custom_preset_(PRESET_NORMAL);
   this->publish_state();
 }
 
@@ -132,6 +138,7 @@ void ActronModbusClimate::dump_config() {
   ESP_LOGCONFIG(TAG, "  Register fan: %u", this->fan_register_);
   ESP_LOGCONFIG(TAG, "  Register mode: %u", this->mode_register_);
   ESP_LOGCONFIG(TAG, "  Register setpoint: %u", this->setpoint_register_);
+  ESP_LOGCONFIG(TAG, "  Register continuous fan: %u", this->continuous_fan_register_);
   ESP_LOGCONFIG(TAG, "  Register room temp: %u", this->room_temp_register_);
 }
 
@@ -196,6 +203,18 @@ void ActronModbusClimate::control(const climate::ClimateCall &call) {
     changed = true;
   }
 
+  if (call.has_custom_preset()) {
+    const char *preset = call.get_custom_preset();
+    if (preset != nullptr && std::strcmp(preset, PRESET_CONTINUOUS) == 0) {
+      this->set_custom_preset_(PRESET_CONTINUOUS);
+      this->queue_or_replace_(PendingType::CONTINUOUS_FAN, this->continuous_fan_register_, 1);
+    } else {
+      this->set_custom_preset_(PRESET_NORMAL);
+      this->queue_or_replace_(PendingType::CONTINUOUS_FAN, this->continuous_fan_register_, 0);
+    }
+    changed = true;
+  }
+
   if (changed && this->optimistic_) {
     this->publish_state();
   }
@@ -206,7 +225,7 @@ void ActronModbusClimate::request_reads_() {
   using modbus::ModbusRegisterType;
 
   uint32_t generation = ++this->read_generation_;
-  this->pending_read_callbacks_ = 5;
+  this->pending_read_callbacks_ = 6;
   this->read_batch_started_ms_ = millis();
 
   this->parent_->queue_command(ModbusCommandItem::create_read_command(
@@ -231,6 +250,12 @@ void ActronModbusClimate::request_reads_() {
       this->parent_, ModbusRegisterType::HOLDING, this->setpoint_register_, 1,
       [this, generation](ModbusRegisterType, uint16_t, const std::vector<uint8_t> &data) {
         this->handle_setpoint_read_(data, generation);
+      }));
+
+  this->parent_->queue_command(ModbusCommandItem::create_read_command(
+      this->parent_, ModbusRegisterType::HOLDING, this->continuous_fan_register_, 1,
+      [this, generation](ModbusRegisterType, uint16_t, const std::vector<uint8_t> &data) {
+        this->handle_continuous_fan_read_(data, generation);
       }));
 
   this->parent_->queue_command(ModbusCommandItem::create_read_command(
@@ -282,6 +307,9 @@ void ActronModbusClimate::mark_expected_(PendingType type, uint16_t value) {
     case PendingType::FAN:
       guard = &this->guard_fan_;
       break;
+    case PendingType::CONTINUOUS_FAN:
+      guard = &this->guard_continuous_fan_;
+      break;
   }
 
   guard->expected = value;
@@ -308,7 +336,7 @@ uint16_t ActronModbusClimate::guarded_raw_(FieldGuard &guard, uint16_t raw) {
 
 void ActronModbusClimate::publish_and_save_() {
   if (!this->raw_power_.has_value() || !this->raw_mode_.has_value() || !this->raw_fan_.has_value() ||
-      !this->raw_setpoint_.has_value()) {
+      !this->raw_setpoint_.has_value() || !this->raw_continuous_fan_.has_value()) {
     return;
   }
 
@@ -316,10 +344,16 @@ void ActronModbusClimate::publish_and_save_() {
   uint16_t mode = this->guarded_raw_(this->guard_mode_, *this->raw_mode_);
   uint16_t fan = this->guarded_raw_(this->guard_fan_, *this->raw_fan_);
   uint16_t setpoint = this->guarded_raw_(this->guard_setpoint_, *this->raw_setpoint_);
+  uint16_t continuous_fan = this->guarded_raw_(this->guard_continuous_fan_, *this->raw_continuous_fan_);
 
   this->mode = mode_from_raw(power, mode);
   this->fan_mode = fan_from_raw(fan);
   this->target_temperature = float(setpoint) * 0.1f;
+  if (continuous_fan == 1) {
+    this->set_custom_preset_(PRESET_CONTINUOUS);
+  } else {
+    this->set_custom_preset_(PRESET_NORMAL);
+  }
   if (this->raw_room_temp_.has_value()) {
     this->current_temperature = float(*this->raw_room_temp_) * 0.1f;
   }
@@ -380,6 +414,14 @@ void ActronModbusClimate::handle_setpoint_read_(const std::vector<uint8_t> &data
     return;
   }
   this->raw_setpoint_ = parse_u16(data);
+  this->finish_read_(generation);
+}
+
+void ActronModbusClimate::handle_continuous_fan_read_(const std::vector<uint8_t> &data, uint32_t generation) {
+  if (generation != this->read_generation_) {
+    return;
+  }
+  this->raw_continuous_fan_ = parse_u16(data);
   this->finish_read_(generation);
 }
 

@@ -50,6 +50,7 @@ climate:
     fan_register: 4
     mode_register: 101
     setpoint_register: 102
+    continuous_fan_register: 105
     room_temp_register: 851
     command_interval: 200ms
     optimistic: true
@@ -61,26 +62,6 @@ climate:
 # ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛ #
 
 # Control
-
-#------------------------------------------
-number:
-  # Control Registers
-  - platform: modbus_controller
-    modbus_controller_id: actron_ac
-    name: "Raw Continuous Fan Register"
-    internal: true
-    id: ac_raw_fan_cont
-    register_type: holding
-    address: 105
-    value_type: U_WORD
-    min_value: 0
-    max_value: 1
-    step: 1
-    #region agent log
-    on_value:
-      - lambda: |-
-          ESP_LOGI("agent_dbg", "H1 raw_fan_cont poll value=%.0f ms=%lu", x, millis());
-    #endregion
 
 #------------------------------------------
 switch:
@@ -110,21 +91,6 @@ switch:
       - lambda: |-
           ESP_LOGI("agent_dbg", "H4 zone_downstairs state=%d ms=%lu", x ? 1 : 0, millis());
     #endregion
-
-  # Control Template Wrappers
-  - platform: template
-    name: "Continuous Fan"
-    id: ac_fan_cont
-    lambda: |-
-      return (id(ac_raw_fan_cont).state == 1);
-    turn_on_action:
-      - number.set:
-          id: ac_raw_fan_cont
-          value: 1
-    turn_off_action:
-      - number.set:
-          id: ac_raw_fan_cont
-          value: 0
 
 #------------------------------------------
 sensor:

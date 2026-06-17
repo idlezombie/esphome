@@ -13,6 +13,7 @@ CONF_POWER_REGISTER = "power_register"
 CONF_FAN_REGISTER = "fan_register"
 CONF_MODE_REGISTER = "mode_register"
 CONF_SETPOINT_REGISTER = "setpoint_register"
+CONF_CONTINUOUS_FAN_REGISTER = "continuous_fan_register"
 CONF_ROOM_TEMP_REGISTER = "room_temp_register"
 CONF_COMMAND_INTERVAL = "command_interval"
 CONF_SETTLE_TIMEOUT = "settle_timeout"
@@ -35,6 +36,7 @@ CONFIG_SCHEMA = (
             cv.Optional(CONF_FAN_REGISTER, default=4): cv.positive_int,
             cv.Optional(CONF_MODE_REGISTER, default=101): cv.positive_int,
             cv.Optional(CONF_SETPOINT_REGISTER, default=102): cv.positive_int,
+            cv.Optional(CONF_CONTINUOUS_FAN_REGISTER, default=105): cv.positive_int,
             cv.Optional(CONF_ROOM_TEMP_REGISTER, default=851): cv.positive_int,
             cv.Optional(CONF_COMMAND_INTERVAL, default="200ms"): cv.positive_time_period_milliseconds,
             cv.Optional(CONF_SETTLE_TIMEOUT, default="5s"): cv.positive_time_period_milliseconds,
@@ -57,6 +59,7 @@ async def to_code(config):
     cg.add(var.set_fan_register(config[CONF_FAN_REGISTER]))
     cg.add(var.set_mode_register(config[CONF_MODE_REGISTER]))
     cg.add(var.set_setpoint_register(config[CONF_SETPOINT_REGISTER]))
+    cg.add(var.set_continuous_fan_register(config[CONF_CONTINUOUS_FAN_REGISTER]))
     cg.add(var.set_room_temp_register(config[CONF_ROOM_TEMP_REGISTER]))
     cg.add(var.set_command_interval_ms(config[CONF_COMMAND_INTERVAL].total_milliseconds))
     cg.add(var.set_settle_timeout_ms(config[CONF_SETTLE_TIMEOUT].total_milliseconds))
