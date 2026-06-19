@@ -9,6 +9,7 @@ Personal ESPHome project. Contents:
 
 - `components/` — custom external ESPHome components. Source of truth, consumed by configs via `external_components: github://idlezombie/esphome@<branch-or-tag>`.
 - `devices/` — reference / backup copies of device YAML configs.
+- `.ha-context/` — gitignored Home Assistant exports (entity registry, areas, etc.) for writing automations. Dump files here; not part of the ESPHome build.
 
 # What this repo is NOT
 

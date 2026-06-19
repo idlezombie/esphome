@@ -1,6 +1,9 @@
 # ESPHome
 .esphome/
 secrets.yaml
+
+# Home Assistant — local dumps for agent context (entity registry, etc.)
+.ha-context/
 *.bin
 
 # Python
