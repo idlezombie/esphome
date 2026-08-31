@@ -51,9 +51,8 @@ modbus_controller:
   - id: actron_ac
     address: 1
     modbus_id: modbus_1
-    # Feedback sensors are slow-changing; climate + zone switches poll on their own.
-    # Keeping this at 1s saturated the bus and caused hub refuse / duplicate warnings.
-    update_interval: 5s
+    # Diagnostics only — keep slow so climate's serialised reads can finish.
+    update_interval: 15s
 
 climate:
   - platform: actron_modbus
@@ -67,8 +66,8 @@ climate:
     room_temp_register: 851
     command_interval: 200ms
     optimistic: true
-    # Serialised reads (1 outstanding) + block mode/setpoint; 2s leaves hub headroom.
-    update_interval: 2s
+    update_interval: 3s
+    read_timeout: 2s
     room_temp_every: 3
 
 # ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓ #
@@ -89,7 +88,7 @@ switch:
     bitmask: 0x0001
     optimistic: true
     settle_timeout: 5s
-    update_interval: 5s
+    update_interval: 10s
 
   - platform: actron_modbus
     modbus_controller_id: actron_ac
@@ -99,7 +98,7 @@ switch:
     bitmask: 0x0001
     optimistic: true
     settle_timeout: 5s
-    update_interval: 5s
+    update_interval: 10s
 
 #------------------------------------------
 sensor:

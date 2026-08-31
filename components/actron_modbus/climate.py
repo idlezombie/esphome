@@ -17,6 +17,7 @@ CONF_CONTINUOUS_FAN_REGISTER = "continuous_fan_register"
 CONF_ROOM_TEMP_REGISTER = "room_temp_register"
 CONF_COMMAND_INTERVAL = "command_interval"
 CONF_SETTLE_TIMEOUT = "settle_timeout"
+CONF_READ_TIMEOUT = "read_timeout"
 CONF_OPTIMISTIC = "optimistic"
 CONF_ROOM_TEMP_EVERY = "room_temp_every"
 
@@ -41,12 +42,14 @@ CONFIG_SCHEMA = (
             cv.Optional(CONF_ROOM_TEMP_REGISTER, default=851): cv.positive_int,
             cv.Optional(CONF_COMMAND_INTERVAL, default="200ms"): cv.positive_time_period_milliseconds,
             cv.Optional(CONF_SETTLE_TIMEOUT, default="5s"): cv.positive_time_period_milliseconds,
+            # Per-step wait before skipping a hung read (hub refuse / dropped frame).
+            cv.Optional(CONF_READ_TIMEOUT, default="2s"): cv.positive_time_period_milliseconds,
             cv.Optional(CONF_OPTIMISTIC, default=True): cv.boolean,
             # Poll room temp on every Nth climate cycle (slow-changing).
             cv.Optional(CONF_ROOM_TEMP_EVERY, default=3): cv.int_range(min=1, max=60),
         }
     )
-    .extend(cv.polling_component_schema("2s"))
+    .extend(cv.polling_component_schema("3s"))
     .extend(cv.COMPONENT_SCHEMA)
 )
 
@@ -66,5 +69,6 @@ async def to_code(config):
     cg.add(var.set_room_temp_register(config[CONF_ROOM_TEMP_REGISTER]))
     cg.add(var.set_command_interval_ms(config[CONF_COMMAND_INTERVAL].total_milliseconds))
     cg.add(var.set_settle_timeout_ms(config[CONF_SETTLE_TIMEOUT].total_milliseconds))
+    cg.add(var.set_read_timeout_ms(config[CONF_READ_TIMEOUT].total_milliseconds))
     cg.add(var.set_optimistic(config[CONF_OPTIMISTIC]))
     cg.add(var.set_room_temp_every(config[CONF_ROOM_TEMP_EVERY]))

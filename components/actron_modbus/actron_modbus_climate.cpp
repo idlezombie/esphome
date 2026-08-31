@@ -118,10 +118,13 @@ void ActronModbusClimate::update() {
   }
 
   if (this->read_step_ != ReadStep::IDLE) {
-    if ((millis() - this->read_chain_started_ms_) < this->settle_timeout_ms_) {
+    if ((millis() - this->read_step_started_ms_) < this->read_timeout_ms_) {
       return;
     }
-    this->abort_read_chain_("timed out");
+    // Hub often refuses/drops a single frame under load. Skip this step and keep
+    // going so earlier reads in the chain are not thrown away.
+    this->skip_read_step_();
+    return;
   }
 
   // Let queued writes drain first so the hub isn't contested mid-chain.
@@ -137,6 +140,7 @@ void ActronModbusClimate::dump_config() {
   ESP_LOGCONFIG(TAG, "  Optimistic: %s", YESNO(this->optimistic_));
   ESP_LOGCONFIG(TAG, "  Command interval: %ums", (unsigned) this->command_interval_ms_);
   ESP_LOGCONFIG(TAG, "  Settle timeout: %ums", (unsigned) this->settle_timeout_ms_);
+  ESP_LOGCONFIG(TAG, "  Read step timeout: %ums", (unsigned) this->read_timeout_ms_);
   ESP_LOGCONFIG(TAG, "  Room temp every: %u cycles", this->room_temp_every_);
   ESP_LOGCONFIG(TAG, "  Register power: %u", this->power_register_);
   ESP_LOGCONFIG(TAG, "  Register fan: %u", this->fan_register_);
@@ -225,7 +229,6 @@ void ActronModbusClimate::control(const climate::ClimateCall &call) {
 
 void ActronModbusClimate::start_read_chain_() {
   uint32_t generation = ++this->read_generation_;
-  this->read_chain_started_ms_ = millis();
   this->include_room_temp_ = (this->update_cycle_++ % this->room_temp_every_) == 0;
   this->read_step_ = ReadStep::POWER;
   ESP_LOGV(TAG, "Starting read chain gen=%u room_temp=%s", (unsigned) generation,
@@ -233,10 +236,11 @@ void ActronModbusClimate::start_read_chain_() {
   this->queue_current_read_();
 }
 
-void ActronModbusClimate::abort_read_chain_(const char *reason) {
-  ESP_LOGW(TAG, "Read chain aborted (%s) at step %u", reason, (unsigned) this->read_step_);
-  this->read_step_ = ReadStep::IDLE;
+void ActronModbusClimate::skip_read_step_() {
+  ESP_LOGW(TAG, "Read step %u timed out, skipping", (unsigned) this->read_step_);
+  // Invalidate any late callback for the abandoned command.
   this->read_generation_++;
+  this->advance_read_step_();
 }
 
 void ActronModbusClimate::queue_current_read_() {
@@ -244,6 +248,7 @@ void ActronModbusClimate::queue_current_read_() {
   using modbus::EntityType;
 
   uint32_t generation = this->read_generation_;
+  this->read_step_started_ms_ = millis();
 
   switch (this->read_step_) {
     case ReadStep::POWER:

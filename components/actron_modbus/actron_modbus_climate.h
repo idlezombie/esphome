@@ -29,6 +29,7 @@ class ActronModbusClimate : public climate::Climate, public PollingComponent {
   void set_room_temp_register(uint16_t reg) { room_temp_register_ = reg; }
   void set_command_interval_ms(uint32_t interval_ms) { command_interval_ms_ = interval_ms; }
   void set_settle_timeout_ms(uint32_t timeout_ms) { settle_timeout_ms_ = timeout_ms; }
+  void set_read_timeout_ms(uint32_t timeout_ms) { read_timeout_ms_ = timeout_ms; }
   void set_optimistic(bool optimistic) { optimistic_ = optimistic; }
   void set_room_temp_every(uint8_t every) { room_temp_every_ = every == 0 ? 1 : every; }
 
@@ -60,7 +61,7 @@ class ActronModbusClimate : public climate::Climate, public PollingComponent {
   void publish_and_save_();
 
   void start_read_chain_();
-  void abort_read_chain_(const char *reason);
+  void skip_read_step_();
   void queue_current_read_();
   void advance_read_step_();
   bool mode_setpoint_contiguous_() const {
@@ -87,8 +88,9 @@ class ActronModbusClimate : public climate::Climate, public PollingComponent {
 
   uint32_t command_interval_ms_{200};
   uint32_t settle_timeout_ms_{5000};
+  uint32_t read_timeout_ms_{2000};
   uint32_t last_write_dispatch_ms_{0};
-  uint32_t read_chain_started_ms_{0};
+  uint32_t read_step_started_ms_{0};
   uint32_t read_generation_{0};
   uint8_t room_temp_every_{3};
   uint8_t update_cycle_{0};
