@@ -51,9 +51,8 @@ modbus_controller:
   - id: actron_ac
     address: 1
     modbus_id: modbus_1
-    # Feedback sensors / zone read-backs are slow-changing; the climate
-    # component polls the control registers at its own (faster) interval.
-    # Keeping this at 1s saturated the bus and caused duplicate-command warnings.
+    # Feedback sensors are slow-changing; climate + zone switches poll on their own.
+    # Keeping this at 1s saturated the bus and caused hub refuse / duplicate warnings.
     update_interval: 5s
 
 climate:
@@ -68,7 +67,9 @@ climate:
     room_temp_register: 851
     command_interval: 200ms
     optimistic: true
-    update_interval: 1s
+    # Serialised reads (1 outstanding) + block mode/setpoint; 2s leaves hub headroom.
+    update_interval: 2s
+    room_temp_every: 3
 
 # ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓ #
 # ┃ Actron ICAMID-MOD Modbus Register Map ┃ #
@@ -79,22 +80,26 @@ climate:
 
 #------------------------------------------
 switch:
-  # Zone Control Registers
-  - platform: modbus_controller
+  # Zone controls — optimistic settle (same pattern as climate) to avoid HA flap.
+  - platform: actron_modbus
     modbus_controller_id: actron_ac
     name: "Zone: Upstairs"
     id: ac_raw_zone_upstairs
-    register_type: holding
     address: 5001
     bitmask: 0x0001
+    optimistic: true
+    settle_timeout: 5s
+    update_interval: 5s
 
-  - platform: modbus_controller
+  - platform: actron_modbus
     modbus_controller_id: actron_ac
     name: "Zone: Downstairs"
     id: ac_raw_zone_downstairs
-    register_type: holding
     address: 5002
     bitmask: 0x0001
+    optimistic: true
+    settle_timeout: 5s
+    update_interval: 5s
 
 #------------------------------------------
 sensor:

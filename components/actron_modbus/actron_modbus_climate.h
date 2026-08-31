@@ -30,9 +30,18 @@ class ActronModbusClimate : public climate::Climate, public PollingComponent {
   void set_command_interval_ms(uint32_t interval_ms) { command_interval_ms_ = interval_ms; }
   void set_settle_timeout_ms(uint32_t timeout_ms) { settle_timeout_ms_ = timeout_ms; }
   void set_optimistic(bool optimistic) { optimistic_ = optimistic; }
+  void set_room_temp_every(uint8_t every) { room_temp_every_ = every == 0 ? 1 : every; }
 
  protected:
   enum class PendingType : uint8_t { POWER, MODE, SETPOINT, FAN, CONTINUOUS_FAN };
+  enum class ReadStep : uint8_t {
+    IDLE,
+    POWER,
+    FAN,
+    MODE_SETPOINT,
+    CONTINUOUS_FAN,
+    ROOM_TEMP,
+  };
   struct PendingCommand {
     PendingType type;
     uint16_t reg;
@@ -43,19 +52,24 @@ class ActronModbusClimate : public climate::Climate, public PollingComponent {
     uint32_t since_ms{0};
   };
 
-  void request_reads_();
   void dispatch_next_write_();
   void queue_or_replace_(PendingType type, uint16_t reg, uint16_t value);
   bool has_pending_() const { return !pending_.empty(); }
   void mark_expected_(PendingType type, uint16_t value);
   uint16_t guarded_raw_(FieldGuard &guard, uint16_t raw);
   void publish_and_save_();
-  void finish_read_(uint32_t generation);
+
+  void start_read_chain_();
+  void abort_read_chain_(const char *reason);
+  void queue_current_read_();
+  void advance_read_step_();
+  bool mode_setpoint_contiguous_() const {
+    return this->setpoint_register_ == this->mode_register_ + 1;
+  }
 
   void handle_power_read_(std::span<const uint8_t> data, uint32_t generation);
   void handle_fan_read_(std::span<const uint8_t> data, uint32_t generation);
-  void handle_mode_read_(std::span<const uint8_t> data, uint32_t generation);
-  void handle_setpoint_read_(std::span<const uint8_t> data, uint32_t generation);
+  void handle_mode_setpoint_read_(std::span<const uint8_t> data, uint32_t generation);
   void handle_continuous_fan_read_(std::span<const uint8_t> data, uint32_t generation);
   void handle_room_temp_read_(std::span<const uint8_t> data, uint32_t generation);
 
@@ -74,9 +88,12 @@ class ActronModbusClimate : public climate::Climate, public PollingComponent {
   uint32_t command_interval_ms_{200};
   uint32_t settle_timeout_ms_{5000};
   uint32_t last_write_dispatch_ms_{0};
-  uint32_t read_batch_started_ms_{0};
+  uint32_t read_chain_started_ms_{0};
   uint32_t read_generation_{0};
-  uint16_t pending_read_callbacks_{0};
+  uint8_t room_temp_every_{3};
+  uint8_t update_cycle_{0};
+  bool include_room_temp_{true};
+  ReadStep read_step_{ReadStep::IDLE};
 
   std::optional<uint16_t> raw_power_;
   std::optional<uint16_t> raw_mode_;

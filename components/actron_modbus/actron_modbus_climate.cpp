@@ -13,11 +13,11 @@ static const char *const TAG = "actron_modbus.climate";
 static const char *const PRESET_NORMAL = "Normal";
 static const char *const PRESET_CONTINUOUS = "Continuous";
 
-static uint16_t parse_u16(std::span<const uint8_t> data) {
-  if (data.size() < 2) {
+static uint16_t parse_u16(std::span<const uint8_t> data, size_t offset = 0) {
+  if (data.size() < offset + 2) {
     return 0;
   }
-  return (uint16_t(data[0]) << 8) | uint16_t(data[1]);
+  return (uint16_t(data[offset]) << 8) | uint16_t(data[offset + 1]);
 }
 
 static climate::ClimateMode mode_from_raw(uint16_t power, uint16_t mode) {
@@ -117,15 +117,19 @@ void ActronModbusClimate::update() {
     return;
   }
 
-  if (this->pending_read_callbacks_ != 0) {
-    if ((millis() - this->read_batch_started_ms_) < this->settle_timeout_ms_) {
+  if (this->read_step_ != ReadStep::IDLE) {
+    if ((millis() - this->read_chain_started_ms_) < this->settle_timeout_ms_) {
       return;
     }
-    ESP_LOGW(TAG, "Read batch timed out with %u callbacks outstanding", this->pending_read_callbacks_);
-    this->pending_read_callbacks_ = 0;
+    this->abort_read_chain_("timed out");
   }
 
-  this->request_reads_();
+  // Let queued writes drain first so the hub isn't contested mid-chain.
+  if (this->has_pending_()) {
+    return;
+  }
+
+  this->start_read_chain_();
 }
 
 void ActronModbusClimate::dump_config() {
@@ -133,6 +137,7 @@ void ActronModbusClimate::dump_config() {
   ESP_LOGCONFIG(TAG, "  Optimistic: %s", YESNO(this->optimistic_));
   ESP_LOGCONFIG(TAG, "  Command interval: %ums", (unsigned) this->command_interval_ms_);
   ESP_LOGCONFIG(TAG, "  Settle timeout: %ums", (unsigned) this->settle_timeout_ms_);
+  ESP_LOGCONFIG(TAG, "  Room temp every: %u cycles", this->room_temp_every_);
   ESP_LOGCONFIG(TAG, "  Register power: %u", this->power_register_);
   ESP_LOGCONFIG(TAG, "  Register fan: %u", this->fan_register_);
   ESP_LOGCONFIG(TAG, "  Register mode: %u", this->mode_register_);
@@ -218,49 +223,101 @@ void ActronModbusClimate::control(const climate::ClimateCall &call) {
   }
 }
 
-void ActronModbusClimate::request_reads_() {
+void ActronModbusClimate::start_read_chain_() {
+  uint32_t generation = ++this->read_generation_;
+  this->read_chain_started_ms_ = millis();
+  this->include_room_temp_ = (this->update_cycle_++ % this->room_temp_every_) == 0;
+  this->read_step_ = ReadStep::POWER;
+  ESP_LOGV(TAG, "Starting read chain gen=%u room_temp=%s", (unsigned) generation,
+           YESNO(this->include_room_temp_));
+  this->queue_current_read_();
+}
+
+void ActronModbusClimate::abort_read_chain_(const char *reason) {
+  ESP_LOGW(TAG, "Read chain aborted (%s) at step %u", reason, (unsigned) this->read_step_);
+  this->read_step_ = ReadStep::IDLE;
+  this->read_generation_++;
+}
+
+void ActronModbusClimate::queue_current_read_() {
   using modbus_controller::ModbusCommandItem;
   using modbus::EntityType;
 
-  uint32_t generation = ++this->read_generation_;
-  this->pending_read_callbacks_ = 6;
-  this->read_batch_started_ms_ = millis();
+  uint32_t generation = this->read_generation_;
 
-  this->parent_->queue_command(ModbusCommandItem::create_read_command(
-      this->parent_, EntityType::HOLDING, this->power_register_, 1,
-      [this, generation](EntityType, uint16_t, std::span<const uint8_t> data) {
-        this->handle_power_read_(data, generation);
-      }));
+  switch (this->read_step_) {
+    case ReadStep::POWER:
+      this->parent_->queue_command(ModbusCommandItem::create_read_command(
+          this->parent_, EntityType::HOLDING, this->power_register_, 1,
+          [this, generation](EntityType, uint16_t, std::span<const uint8_t> data) {
+            this->handle_power_read_(data, generation);
+          }));
+      break;
+    case ReadStep::FAN:
+      this->parent_->queue_command(ModbusCommandItem::create_read_command(
+          this->parent_, EntityType::HOLDING, this->fan_register_, 1,
+          [this, generation](EntityType, uint16_t, std::span<const uint8_t> data) {
+            this->handle_fan_read_(data, generation);
+          }));
+      break;
+    case ReadStep::MODE_SETPOINT: {
+      uint16_t count = this->mode_setpoint_contiguous_() ? 2 : 1;
+      this->parent_->queue_command(ModbusCommandItem::create_read_command(
+          this->parent_, EntityType::HOLDING, this->mode_register_, count,
+          [this, generation](EntityType, uint16_t, std::span<const uint8_t> data) {
+            this->handle_mode_setpoint_read_(data, generation);
+          }));
+      break;
+    }
+    case ReadStep::CONTINUOUS_FAN:
+      this->parent_->queue_command(ModbusCommandItem::create_read_command(
+          this->parent_, EntityType::HOLDING, this->continuous_fan_register_, 1,
+          [this, generation](EntityType, uint16_t, std::span<const uint8_t> data) {
+            this->handle_continuous_fan_read_(data, generation);
+          }));
+      break;
+    case ReadStep::ROOM_TEMP:
+      this->parent_->queue_command(ModbusCommandItem::create_read_command(
+          this->parent_, EntityType::HOLDING, this->room_temp_register_, 1,
+          [this, generation](EntityType, uint16_t, std::span<const uint8_t> data) {
+            this->handle_room_temp_read_(data, generation);
+          }));
+      break;
+    case ReadStep::IDLE:
+      break;
+  }
+}
 
-  this->parent_->queue_command(ModbusCommandItem::create_read_command(
-      this->parent_, EntityType::HOLDING, this->fan_register_, 1,
-      [this, generation](EntityType, uint16_t, std::span<const uint8_t> data) {
-        this->handle_fan_read_(data, generation);
-      }));
-
-  this->parent_->queue_command(ModbusCommandItem::create_read_command(
-      this->parent_, EntityType::HOLDING, this->mode_register_, 1,
-      [this, generation](EntityType, uint16_t, std::span<const uint8_t> data) {
-        this->handle_mode_read_(data, generation);
-      }));
-
-  this->parent_->queue_command(ModbusCommandItem::create_read_command(
-      this->parent_, EntityType::HOLDING, this->setpoint_register_, 1,
-      [this, generation](EntityType, uint16_t, std::span<const uint8_t> data) {
-        this->handle_setpoint_read_(data, generation);
-      }));
-
-  this->parent_->queue_command(ModbusCommandItem::create_read_command(
-      this->parent_, EntityType::HOLDING, this->continuous_fan_register_, 1,
-      [this, generation](EntityType, uint16_t, std::span<const uint8_t> data) {
-        this->handle_continuous_fan_read_(data, generation);
-      }));
-
-  this->parent_->queue_command(ModbusCommandItem::create_read_command(
-      this->parent_, EntityType::HOLDING, this->room_temp_register_, 1,
-      [this, generation](EntityType, uint16_t, std::span<const uint8_t> data) {
-        this->handle_room_temp_read_(data, generation);
-      }));
+void ActronModbusClimate::advance_read_step_() {
+  switch (this->read_step_) {
+    case ReadStep::POWER:
+      this->read_step_ = ReadStep::FAN;
+      this->queue_current_read_();
+      break;
+    case ReadStep::FAN:
+      this->read_step_ = ReadStep::MODE_SETPOINT;
+      this->queue_current_read_();
+      break;
+    case ReadStep::MODE_SETPOINT:
+      this->read_step_ = ReadStep::CONTINUOUS_FAN;
+      this->queue_current_read_();
+      break;
+    case ReadStep::CONTINUOUS_FAN:
+      if (this->include_room_temp_) {
+        this->read_step_ = ReadStep::ROOM_TEMP;
+        this->queue_current_read_();
+      } else {
+        this->read_step_ = ReadStep::IDLE;
+        this->publish_and_save_();
+      }
+      break;
+    case ReadStep::ROOM_TEMP:
+      this->read_step_ = ReadStep::IDLE;
+      this->publish_and_save_();
+      break;
+    case ReadStep::IDLE:
+      break;
+  }
 }
 
 void ActronModbusClimate::dispatch_next_write_() {
@@ -371,64 +428,61 @@ void ActronModbusClimate::publish_and_save_() {
   this->publish_state();
 }
 
-void ActronModbusClimate::finish_read_(uint32_t generation) {
-  if (generation != this->read_generation_) {
-    return;
-  }
-  if (this->pending_read_callbacks_ > 0) {
-    this->pending_read_callbacks_--;
-  }
-  if (this->pending_read_callbacks_ == 0) {
-    this->publish_and_save_();
-  }
-}
-
 void ActronModbusClimate::handle_power_read_(std::span<const uint8_t> data, uint32_t generation) {
-  if (generation != this->read_generation_) {
+  if (generation != this->read_generation_ || this->read_step_ != ReadStep::POWER) {
     return;
   }
   this->raw_power_ = parse_u16(data);
-  this->finish_read_(generation);
+  this->advance_read_step_();
 }
 
 void ActronModbusClimate::handle_fan_read_(std::span<const uint8_t> data, uint32_t generation) {
-  if (generation != this->read_generation_) {
+  if (generation != this->read_generation_ || this->read_step_ != ReadStep::FAN) {
     return;
   }
   this->raw_fan_ = parse_u16(data);
-  this->finish_read_(generation);
+  this->advance_read_step_();
 }
 
-void ActronModbusClimate::handle_mode_read_(std::span<const uint8_t> data, uint32_t generation) {
-  if (generation != this->read_generation_) {
+void ActronModbusClimate::handle_mode_setpoint_read_(std::span<const uint8_t> data, uint32_t generation) {
+  if (generation != this->read_generation_ || this->read_step_ != ReadStep::MODE_SETPOINT) {
     return;
   }
-  this->raw_mode_ = parse_u16(data);
-  this->finish_read_(generation);
-}
-
-void ActronModbusClimate::handle_setpoint_read_(std::span<const uint8_t> data, uint32_t generation) {
-  if (generation != this->read_generation_) {
+  this->raw_mode_ = parse_u16(data, 0);
+  if (this->mode_setpoint_contiguous_()) {
+    this->raw_setpoint_ = parse_u16(data, 2);
+  } else {
+    // Fallback: only mode was requested; fetch setpoint as a follow-up command.
+    using modbus_controller::ModbusCommandItem;
+    using modbus::EntityType;
+    this->parent_->queue_command(ModbusCommandItem::create_read_command(
+        this->parent_, EntityType::HOLDING, this->setpoint_register_, 1,
+        [this, generation](EntityType, uint16_t, std::span<const uint8_t> sp_data) {
+          if (generation != this->read_generation_ || this->read_step_ != ReadStep::MODE_SETPOINT) {
+            return;
+          }
+          this->raw_setpoint_ = parse_u16(sp_data);
+          this->advance_read_step_();
+        }));
     return;
   }
-  this->raw_setpoint_ = parse_u16(data);
-  this->finish_read_(generation);
+  this->advance_read_step_();
 }
 
 void ActronModbusClimate::handle_continuous_fan_read_(std::span<const uint8_t> data, uint32_t generation) {
-  if (generation != this->read_generation_) {
+  if (generation != this->read_generation_ || this->read_step_ != ReadStep::CONTINUOUS_FAN) {
     return;
   }
   this->raw_continuous_fan_ = parse_u16(data);
-  this->finish_read_(generation);
+  this->advance_read_step_();
 }
 
 void ActronModbusClimate::handle_room_temp_read_(std::span<const uint8_t> data, uint32_t generation) {
-  if (generation != this->read_generation_) {
+  if (generation != this->read_generation_ || this->read_step_ != ReadStep::ROOM_TEMP) {
     return;
   }
   this->raw_room_temp_ = parse_u16(data);
-  this->finish_read_(generation);
+  this->advance_read_step_();
 }
 
 }  // namespace actron_modbus

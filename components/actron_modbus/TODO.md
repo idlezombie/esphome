@@ -38,7 +38,8 @@ by the time you read this — verify against the current code before starting.
       registers, in `devices/esp32c3m-ss-2.yaml`. Applied and verified on hardware.
 - [x] Integrate continuous fan mode (reg 105) into the climate entity as custom
       presets `Normal` / `Continuous`; removed the standalone Continuous Fan switch.
-      Zone controls (regs 5001-5002) still standalone — pending integration.
+      Zone controls use `actron_modbus` switch (optimistic settle) — not folded into
+      the climate entity.
 - [ ] Shorten HA climate mode label `fan_only` from "Fan only" to "Fan" (ESPHome
       cannot rename standard HVAC modes; needs a Home Assistant UI/translation tweak).
 - [ ] Build a companion automation to manage AC control based on house temperature
@@ -55,19 +56,19 @@ by the time you read this — verify against the current code before starting.
 - [ ] Tune `settle_timeout` (currently defaults to `5s`). 5s was a safe starting
       point; likely can be lowered once the read cadence is understood. Exposed as
       a config option so it can be changed without a code edit.
-- [ ] Collapse adjacent register reads into block reads. `mode` (101) and
-      `setpoint` (102) are contiguous and could be a single 2-register read instead
-      of two single-register reads. `power` (1), `fan` (4) and `room_temp` (851) are
-      non-contiguous and would stay separate.
-- [ ] Consider polling `room_temp` at a slower cadence than the control registers —
-      it changes slowly and doesn't need the 1s control-register poll rate.
-- [ ] Re-check publish chatter. We now publish once per completed read batch; verify
-      there's no remaining redundant `publish_state()` churn.
+- [x] Collapse adjacent register reads into block reads. `mode` (101) + `setpoint`
+      (102) are read as one 2-register block when contiguous.
+- [x] Poll `room_temp` slower via `room_temp_every` (default every 3rd climate cycle).
+- [x] Serialise climate reads (one outstanding command) — ESPHome 2026.8 hub refuses
+      extra frames when `Frame already active … with 2 requests pending`, which made
+      the old 6-at-once batch time out with 6 callbacks outstanding and never publish.
+- [x] Zone switches moved to `actron_modbus` platform with optimistic + settle guard
+      (stock `modbus_controller` switch has no optimistic mode → HA flap on write).
+- [ ] Re-check publish chatter after serialised reads land on hardware.
 - [ ] Review overall Modbus behaviour/timing (poll cadence, command interval, queue
-      usage) for sanity — the initial pattern was lifted from someone else's project
-      and may not be an ideal fit. Levers: `modbus` `send_wait_time` (100ms is
-      conservative; lower cautiously and test for comms errors), the climate
-      component's own `update_interval`/`command_interval`, and block reads (below).
+      usage) for sanity. Levers: `modbus` `send_wait_time` (100ms is conservative;
+      lower cautiously and test for comms errors), climate `update_interval` /
+      `command_interval`.
 
 ## Housekeeping
 
