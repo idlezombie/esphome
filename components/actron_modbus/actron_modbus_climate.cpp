@@ -1,4 +1,5 @@
 #include "actron_modbus_climate.h"
+#include "actron_modbus_bus.h"
 
 #include <algorithm>
 #include <cmath>
@@ -9,6 +10,7 @@ namespace esphome {
 namespace actron_modbus {
 
 static const char *const TAG = "actron_modbus.climate";
+static const char *const READ_TIMEOUT_NAME = "actron_read_next";
 
 static const char *const PRESET_NORMAL = "Normal";
 static const char *const PRESET_CONTINUOUS = "Continuous";
@@ -121,9 +123,7 @@ void ActronModbusClimate::update() {
     if ((millis() - this->read_step_started_ms_) < this->read_timeout_ms_) {
       return;
     }
-    // Hub often refuses/drops a single frame under load. Skip this step and keep
-    // going so earlier reads in the chain are not thrown away.
-    this->skip_read_step_();
+    this->on_read_step_timeout_();
     return;
   }
 
@@ -228,17 +228,36 @@ void ActronModbusClimate::control(const climate::ClimateCall &call) {
 }
 
 void ActronModbusClimate::start_read_chain_() {
+  this->cancel_timeout(READ_TIMEOUT_NAME);
   uint32_t generation = ++this->read_generation_;
   this->include_room_temp_ = (this->update_cycle_++ % this->room_temp_every_) == 0;
+  this->step_retried_ = false;
   this->read_step_ = ReadStep::POWER;
+  climate_bus_busy() = true;
   ESP_LOGV(TAG, "Starting read chain gen=%u room_temp=%s", (unsigned) generation,
            YESNO(this->include_room_temp_));
   this->queue_current_read_();
 }
 
-void ActronModbusClimate::skip_read_step_() {
-  ESP_LOGW(TAG, "Read step %u timed out, skipping", (unsigned) this->read_step_);
-  // Invalidate any late callback for the abandoned command.
+void ActronModbusClimate::finish_read_chain_() {
+  this->cancel_timeout(READ_TIMEOUT_NAME);
+  this->read_step_ = ReadStep::IDLE;
+  this->step_retried_ = false;
+  climate_bus_busy() = false;
+  this->publish_and_save_();
+}
+
+void ActronModbusClimate::on_read_step_timeout_() {
+  if (!this->step_retried_) {
+    this->step_retried_ = true;
+    ESP_LOGD(TAG, "Read step %u timed out, retrying", (unsigned) this->read_step_);
+    this->read_generation_++;
+    this->queue_current_read_();
+    return;
+  }
+
+  ESP_LOGD(TAG, "Read step %u timed out, skipping", (unsigned) this->read_step_);
+  this->step_retried_ = false;
   this->read_generation_++;
   this->advance_read_step_();
 }
@@ -293,32 +312,36 @@ void ActronModbusClimate::queue_current_read_() {
   }
 }
 
+void ActronModbusClimate::schedule_next_step_(ReadStep next) {
+  this->cancel_timeout(READ_TIMEOUT_NAME);
+  this->read_step_ = next;
+  this->step_retried_ = false;
+  // Keep step non-IDLE so update() won't start a second chain, but don't count the
+  // inter-step gap against read_timeout.
+  this->read_step_started_ms_ = millis();
+  this->set_timeout(READ_TIMEOUT_NAME, this->command_interval_ms_, [this]() { this->queue_current_read_(); });
+}
+
 void ActronModbusClimate::advance_read_step_() {
   switch (this->read_step_) {
     case ReadStep::POWER:
-      this->read_step_ = ReadStep::FAN;
-      this->queue_current_read_();
+      this->schedule_next_step_(ReadStep::FAN);
       break;
     case ReadStep::FAN:
-      this->read_step_ = ReadStep::MODE_SETPOINT;
-      this->queue_current_read_();
+      this->schedule_next_step_(ReadStep::MODE_SETPOINT);
       break;
     case ReadStep::MODE_SETPOINT:
-      this->read_step_ = ReadStep::CONTINUOUS_FAN;
-      this->queue_current_read_();
+      this->schedule_next_step_(ReadStep::CONTINUOUS_FAN);
       break;
     case ReadStep::CONTINUOUS_FAN:
       if (this->include_room_temp_) {
-        this->read_step_ = ReadStep::ROOM_TEMP;
-        this->queue_current_read_();
+        this->schedule_next_step_(ReadStep::ROOM_TEMP);
       } else {
-        this->read_step_ = ReadStep::IDLE;
-        this->publish_and_save_();
+        this->finish_read_chain_();
       }
       break;
     case ReadStep::ROOM_TEMP:
-      this->read_step_ = ReadStep::IDLE;
-      this->publish_and_save_();
+      this->finish_read_chain_();
       break;
     case ReadStep::IDLE:
       break;
@@ -457,9 +480,9 @@ void ActronModbusClimate::handle_mode_setpoint_read_(std::span<const uint8_t> da
   if (this->mode_setpoint_contiguous_()) {
     this->raw_setpoint_ = parse_u16(data, 2);
   } else {
-    // Fallback: only mode was requested; fetch setpoint as a follow-up command.
     using modbus_controller::ModbusCommandItem;
     using modbus::EntityType;
+    this->read_step_started_ms_ = millis();
     this->parent_->queue_command(ModbusCommandItem::create_read_command(
         this->parent_, EntityType::HOLDING, this->setpoint_register_, 1,
         [this, generation](EntityType, uint16_t, std::span<const uint8_t> sp_data) {

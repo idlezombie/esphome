@@ -64,7 +64,10 @@ by the time you read this — verify against the current code before starting.
       the old 6-at-once batch time out with 6 callbacks outstanding and never publish.
 - [x] Zone switches moved to `actron_modbus` platform with optimistic + settle guard
       (stock `modbus_controller` switch has no optimistic mode → HA flap on write).
-- [ ] Re-check publish chatter after serialised reads land on hardware.
+- [x] Split diagnostics onto a second `modbus_controller` (`actron_diag`, 60s) so
+      climate/zones own a quiet hub; zones defer while climate chain is busy; climate
+      retries a step once then skips; inter-step gap = `command_interval`.
+- [ ] Re-check publish chatter / skip rate on hardware after the dual-controller split.
 - [ ] Review overall Modbus behaviour/timing (poll cadence, command interval, queue
       usage) for sanity. Levers: `modbus` `send_wait_time` (100ms is conservative;
       lower cautiously and test for comms errors), climate `update_interval` /

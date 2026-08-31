@@ -47,12 +47,19 @@ modbus:
   uart_id: uart_1
   send_wait_time: 100ms
 
+# Two controllers, same slave address (ESPHome 2026.8+): climate/zones get a quiet
+# bus most of the time; diagnostics poll slowly on their own cadence.
 modbus_controller:
   - id: actron_ac
     address: 1
     modbus_id: modbus_1
-    # Diagnostics only — keep slow so climate's serialised reads can finish.
-    update_interval: 15s
+    # No sensors on this controller — climate/zones queue commands themselves.
+    update_interval: never
+
+  - id: actron_diag
+    address: 1
+    modbus_id: modbus_1
+    update_interval: 60s
 
 climate:
   - platform: actron_modbus
@@ -66,8 +73,8 @@ climate:
     room_temp_register: 851
     command_interval: 200ms
     optimistic: true
-    update_interval: 3s
-    read_timeout: 2s
+    update_interval: 4s
+    read_timeout: 3s
     room_temp_every: 3
 
 # ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓ #
@@ -79,7 +86,6 @@ climate:
 
 #------------------------------------------
 switch:
-  # Zone controls — optimistic settle (same pattern as climate) to avoid HA flap.
   - platform: actron_modbus
     modbus_controller_id: actron_ac
     name: "Zone: Upstairs"
@@ -88,7 +94,7 @@ switch:
     bitmask: 0x0001
     optimistic: true
     settle_timeout: 5s
-    update_interval: 10s
+    update_interval: 15s
 
   - platform: actron_modbus
     modbus_controller_id: actron_ac
@@ -98,13 +104,12 @@ switch:
     bitmask: 0x0001
     optimistic: true
     settle_timeout: 5s
-    update_interval: 10s
+    update_interval: 15s
 
 #------------------------------------------
 sensor:
-  # Feedback Registers
   - platform: modbus_controller
-    modbus_controller_id: actron_ac
+    modbus_controller_id: actron_diag
     name: "Fan Speed Demand"
     id: ac_raw_fan_speed_demand
     entity_category: diagnostic
@@ -116,10 +121,10 @@ sensor:
     lambda: |-
       return (x * 0.1);
     filters:
-      - throttle_average: 10s
+      - throttle_average: 30s
 
   - platform: modbus_controller
-    modbus_controller_id: actron_ac
+    modbus_controller_id: actron_diag
     name: "Indoor Coil Temperature"
     id: ac_raw_coil_temp
     entity_category: diagnostic
@@ -131,10 +136,10 @@ sensor:
     lambda: |-
       return (x * 0.1);
     filters:
-      - throttle_average: 10s
+      - throttle_average: 30s
 
   - platform: modbus_controller
-    modbus_controller_id: actron_ac
+    modbus_controller_id: actron_diag
     name: "Raw Indoor Comms Register"
     internal: true
     id: ac_raw_indoor_comms
@@ -145,7 +150,7 @@ sensor:
     value_type: U_WORD
 
   - platform: modbus_controller
-    modbus_controller_id: actron_ac
+    modbus_controller_id: actron_diag
     name: "Compressor Demand"
     id: ac_raw_compressor_demand
     entity_category: diagnostic
@@ -157,10 +162,9 @@ sensor:
     lambda: |-
       return x * 0.1;
     filters:
-      - throttle_average: 10s
+      - throttle_average: 30s
 
 binary_sensor:
-  # Feedback Template Wrappers
   - platform: template
     name: "Indoor Unit Comms Status"
     id: ac_indoor_comms

@@ -30,7 +30,7 @@ CONFIG_SCHEMA = (
             cv.Optional(CONF_OPTIMISTIC, default=True): cv.boolean,
         }
     )
-    .extend(cv.polling_component_schema("5s"))
+    .extend(cv.polling_component_schema("15s"))
     .extend(cv.COMPONENT_SCHEMA)
 )
 

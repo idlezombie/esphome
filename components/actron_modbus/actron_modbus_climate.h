@@ -61,8 +61,10 @@ class ActronModbusClimate : public climate::Climate, public PollingComponent {
   void publish_and_save_();
 
   void start_read_chain_();
-  void skip_read_step_();
+  void finish_read_chain_();
+  void on_read_step_timeout_();
   void queue_current_read_();
+  void schedule_next_step_(ReadStep next);
   void advance_read_step_();
   bool mode_setpoint_contiguous_() const {
     return this->setpoint_register_ == this->mode_register_ + 1;
@@ -76,6 +78,7 @@ class ActronModbusClimate : public climate::Climate, public PollingComponent {
 
   bool available_{true};
   bool optimistic_{true};
+  bool step_retried_{false};
 
   modbus_controller::ModbusController *parent_{nullptr};
 
@@ -88,7 +91,7 @@ class ActronModbusClimate : public climate::Climate, public PollingComponent {
 
   uint32_t command_interval_ms_{200};
   uint32_t settle_timeout_ms_{5000};
-  uint32_t read_timeout_ms_{2000};
+  uint32_t read_timeout_ms_{3000};
   uint32_t last_write_dispatch_ms_{0};
   uint32_t read_step_started_ms_{0};
   uint32_t read_generation_{0};

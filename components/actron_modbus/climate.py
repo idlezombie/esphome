@@ -43,13 +43,13 @@ CONFIG_SCHEMA = (
             cv.Optional(CONF_COMMAND_INTERVAL, default="200ms"): cv.positive_time_period_milliseconds,
             cv.Optional(CONF_SETTLE_TIMEOUT, default="5s"): cv.positive_time_period_milliseconds,
             # Per-step wait before skipping a hung read (hub refuse / dropped frame).
-            cv.Optional(CONF_READ_TIMEOUT, default="2s"): cv.positive_time_period_milliseconds,
+            cv.Optional(CONF_READ_TIMEOUT, default="3s"): cv.positive_time_period_milliseconds,
             cv.Optional(CONF_OPTIMISTIC, default=True): cv.boolean,
             # Poll room temp on every Nth climate cycle (slow-changing).
             cv.Optional(CONF_ROOM_TEMP_EVERY, default=3): cv.int_range(min=1, max=60),
         }
     )
-    .extend(cv.polling_component_schema("3s"))
+    .extend(cv.polling_component_schema("4s"))
     .extend(cv.COMPONENT_SCHEMA)
 )
 

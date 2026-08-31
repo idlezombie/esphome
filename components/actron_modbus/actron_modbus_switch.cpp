@@ -1,4 +1,5 @@
 #include "actron_modbus_switch.h"
+#include "actron_modbus_bus.h"
 
 #include "esphome/core/log.h"
 
@@ -47,11 +48,16 @@ void ActronModbusSwitch::update() {
     return;
   }
 
+  // Climate owns the hub while its read chain runs.
+  if (climate_bus_busy()) {
+    return;
+  }
+
   if (this->read_pending_) {
     if ((millis() - this->read_started_ms_) < this->settle_timeout_ms_) {
       return;
     }
-    ESP_LOGW(TAG, "'%s' read timed out", this->get_name().c_str());
+    ESP_LOGD(TAG, "'%s' read timed out", this->get_name().c_str());
     this->read_pending_ = false;
     this->read_generation_++;
   }
