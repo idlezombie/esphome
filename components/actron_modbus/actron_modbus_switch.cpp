@@ -16,7 +16,6 @@ static uint16_t parse_u16(std::span<const uint8_t> data) {
 
 void ActronModbusSwitch::setup() {
   // Wait for the first successful poll; don't force a boot write.
-  this->set_assumed_state(this->optimistic_);
 }
 
 void ActronModbusSwitch::dump_config() {
