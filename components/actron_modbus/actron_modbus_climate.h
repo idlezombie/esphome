@@ -1,6 +1,7 @@
 #pragma once
 
 #include <optional>
+#include <span>
 #include <vector>
 
 #include "esphome/components/climate/climate.h"
@@ -51,12 +52,12 @@ class ActronModbusClimate : public climate::Climate, public PollingComponent {
   void publish_and_save_();
   void finish_read_(uint32_t generation);
 
-  void handle_power_read_(const std::vector<uint8_t> &data, uint32_t generation);
-  void handle_fan_read_(const std::vector<uint8_t> &data, uint32_t generation);
-  void handle_mode_read_(const std::vector<uint8_t> &data, uint32_t generation);
-  void handle_setpoint_read_(const std::vector<uint8_t> &data, uint32_t generation);
-  void handle_continuous_fan_read_(const std::vector<uint8_t> &data, uint32_t generation);
-  void handle_room_temp_read_(const std::vector<uint8_t> &data, uint32_t generation);
+  void handle_power_read_(std::span<const uint8_t> data, uint32_t generation);
+  void handle_fan_read_(std::span<const uint8_t> data, uint32_t generation);
+  void handle_mode_read_(std::span<const uint8_t> data, uint32_t generation);
+  void handle_setpoint_read_(std::span<const uint8_t> data, uint32_t generation);
+  void handle_continuous_fan_read_(std::span<const uint8_t> data, uint32_t generation);
+  void handle_room_temp_read_(std::span<const uint8_t> data, uint32_t generation);
 
   bool available_{true};
   bool optimistic_{true};
