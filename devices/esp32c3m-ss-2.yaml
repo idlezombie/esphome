@@ -47,44 +47,36 @@ modbus:
   uart_id: uart_1
   send_wait_time: 100ms
 
-# Two controllers, same slave address (ESPHome 2026.8+): climate/zones get a quiet
-# bus most of the time; diagnostics poll slowly on their own cadence.
+# Single controller — climate reads come from sensors on this poll path only
+# (no parallel create_read_command chain fighting the hub).
 modbus_controller:
   - id: actron_ac
     address: 1
     modbus_id: modbus_1
-    # No sensors on this controller — climate/zones queue commands themselves.
-    update_interval: never
-
-  - id: actron_diag
-    address: 1
-    modbus_id: modbus_1
-    update_interval: 60s
+    update_interval: 5s
 
 climate:
   - platform: actron_modbus
     name: "Climate"
     modbus_controller_id: actron_ac
+    power_sensor_id: ac_raw_power
+    fan_sensor_id: ac_raw_fan
+    mode_sensor_id: ac_raw_mode
+    setpoint_sensor_id: ac_raw_setpoint
+    continuous_fan_sensor_id: ac_raw_continuous_fan
+    room_temp_sensor_id: ac_raw_room_temp
     power_register: 1
     fan_register: 4
     mode_register: 101
     setpoint_register: 102
     continuous_fan_register: 105
-    room_temp_register: 851
     command_interval: 200ms
     optimistic: true
-    update_interval: 4s
-    read_timeout: 3s
-    room_temp_every: 3
 
 # ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓ #
 # ┃ Actron ICAMID-MOD Modbus Register Map ┃ #
-# ┃  Classic Series - Usable Values Only  ┃ #
 # ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛ #
 
-# Control
-
-#------------------------------------------
 switch:
   - platform: actron_modbus
     modbus_controller_id: actron_ac
@@ -94,7 +86,7 @@ switch:
     bitmask: 0x0001
     optimistic: true
     settle_timeout: 5s
-    update_interval: 15s
+    update_interval: 30s
 
   - platform: actron_modbus
     modbus_controller_id: actron_ac
@@ -104,12 +96,61 @@ switch:
     bitmask: 0x0001
     optimistic: true
     settle_timeout: 5s
-    update_interval: 15s
+    update_interval: 30s
 
-#------------------------------------------
 sensor:
+  # --- Climate register mirrors (internal) ---
   - platform: modbus_controller
-    modbus_controller_id: actron_diag
+    modbus_controller_id: actron_ac
+    id: ac_raw_power
+    internal: true
+    register_type: holding
+    address: 1
+    value_type: U_WORD
+
+  - platform: modbus_controller
+    modbus_controller_id: actron_ac
+    id: ac_raw_fan
+    internal: true
+    register_type: holding
+    address: 4
+    value_type: U_WORD
+
+  - platform: modbus_controller
+    modbus_controller_id: actron_ac
+    id: ac_raw_mode
+    internal: true
+    register_type: holding
+    address: 101
+    value_type: U_WORD
+
+  - platform: modbus_controller
+    modbus_controller_id: actron_ac
+    id: ac_raw_setpoint
+    internal: true
+    register_type: holding
+    address: 102
+    value_type: U_WORD
+
+  - platform: modbus_controller
+    modbus_controller_id: actron_ac
+    id: ac_raw_continuous_fan
+    internal: true
+    register_type: holding
+    address: 105
+    value_type: U_WORD
+
+  - platform: modbus_controller
+    modbus_controller_id: actron_ac
+    id: ac_raw_room_temp
+    internal: true
+    register_type: holding
+    address: 851
+    value_type: U_WORD
+
+  # --- Diagnostics (same controller, polled far less often) ---
+  - platform: modbus_controller
+    modbus_controller_id: actron_ac
     name: "Fan Speed Demand"
     id: ac_raw_fan_speed_demand
     entity_category: diagnostic
@@ -118,13 +159,14 @@ sensor:
     value_type: U_WORD
     unit_of_measurement: "%"
     accuracy_decimals: 1
+    skip_updates: 11
     lambda: |-
       return (x * 0.1);
     filters:
       - throttle_average: 30s
 
   - platform: modbus_controller
-    modbus_controller_id: actron_diag
+    modbus_controller_id: actron_ac
     name: "Indoor Coil Temperature"
     id: ac_raw_coil_temp
     entity_category: diagnostic
@@ -133,13 +175,14 @@ sensor:
     register_type: holding
     address: 1301
     value_type: U_WORD
+    skip_updates: 11
     lambda: |-
       return (x * 0.1);
     filters:
       - throttle_average: 30s
 
   - platform: modbus_controller
-    modbus_controller_id: actron_diag
+    modbus_controller_id: actron_ac
     name: "Raw Indoor Comms Register"
     internal: true
     id: ac_raw_indoor_comms
@@ -148,9 +191,10 @@ sensor:
     register_type: holding
     address: 906
     value_type: U_WORD
+    skip_updates: 11
 
   - platform: modbus_controller
-    modbus_controller_id: actron_diag
+    modbus_controller_id: actron_ac
     name: "Compressor Demand"
     id: ac_raw_compressor_demand
     entity_category: diagnostic
@@ -159,6 +203,7 @@ sensor:
     register_type: holding
     address: 1104
     value_type: U_WORD
+    skip_updates: 11
     lambda: |-
       return x * 0.1;
     filters:

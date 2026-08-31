@@ -59,19 +59,12 @@ by the time you read this — verify against the current code before starting.
 - [x] Collapse adjacent register reads into block reads. `mode` (101) + `setpoint`
       (102) are read as one 2-register block when contiguous.
 - [x] Poll `room_temp` slower via `room_temp_every` (default every 3rd climate cycle).
-- [x] Serialise climate reads (one outstanding command) — ESPHome 2026.8 hub refuses
-      extra frames when `Frame already active … with 2 requests pending`, which made
-      the old 6-at-once batch time out with 6 callbacks outstanding and never publish.
-- [x] Zone switches moved to `actron_modbus` platform with optimistic + settle guard
-      (stock `modbus_controller` switch has no optimistic mode → HA flap on write).
-- [x] Split diagnostics onto a second `modbus_controller` (`actron_diag`, 60s) so
-      climate/zones own a quiet hub; zones defer while climate chain is busy; climate
-      retries a step once then skips; inter-step gap = `command_interval`.
-- [ ] Re-check publish chatter / skip rate on hardware after the dual-controller split.
-- [ ] Review overall Modbus behaviour/timing (poll cadence, command interval, queue
-      usage) for sanity. Levers: `modbus` `send_wait_time` (100ms is conservative;
-      lower cautiously and test for comms errors), climate `update_interval` /
-      `command_interval`.
+- [x] Climate reads via internal `modbus_controller` sensors on one poll path —
+      removed parallel `create_read_command` chain (hub refuse / step timeouts).
+      Diagnostics use `skip_updates: 11` (~60s at 5s controller interval).
+- [ ] Re-check zone switch create_read_command vs controller poll contention
+      (zones at 30s; may later mirror as sensors too).
+- [ ] Review overall Modbus behaviour/timing for sanity.
 
 ## Housekeeping
 

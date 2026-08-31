@@ -1,5 +1,4 @@
 #include "actron_modbus_switch.h"
-#include "actron_modbus_bus.h"
 
 #include "esphome/core/log.h"
 
@@ -45,11 +44,6 @@ void ActronModbusSwitch::write_state(bool state) {
 
 void ActronModbusSwitch::update() {
   if (this->parent_ == nullptr) {
-    return;
-  }
-
-  // Climate owns the hub while its read chain runs.
-  if (climate_bus_busy()) {
     return;
   }
 
